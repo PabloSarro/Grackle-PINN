@@ -1,9 +1,9 @@
 import torch
-from model import CoolingNetwork
+from model import PINN
 from physics import physics_loss
 
 # 1. Setup
-model = CoolingNetwork().to('cuda')
+model = PINN()
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 criterion = torch.nn.MSELoss()
 
@@ -13,11 +13,11 @@ for epoch in range(10):
     optimizer.zero_grad()
     
     # Loss 1: Data Loss (The standard NN part)
-    predictions = model(inputs)
-    loss_data = criterion(predictions, targets)
+    predictions = model(X)
+    loss_data = criterion(predictions, Y)
     
     # Loss 2: Physics Loss (The PINN part)
-    loss_physics = physics_loss(model, inputs)
+    loss_physics = physics_loss(model, X)
     
     # Total combined loss
     total_loss = loss_data + 0.1 * loss_physics # 0.1 is the 'physics weight'

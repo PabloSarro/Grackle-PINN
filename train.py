@@ -12,7 +12,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 DATA_PATH = "Grackle_GTs/"    # Path where output_*.dat are located
-BATCH_SIZE = 16384
+BATCH_SIZE = 8192
 LEARNING_RATE = 5e-4
 EPOCHS = 100
 LAMBDA_PHYS = 1.0e-4  # Weight used for the physics loss

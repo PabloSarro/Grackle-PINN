@@ -20,38 +20,48 @@ class GrackleDataset(Dataset):
         if not files:
             raise FileNotFoundError(f"No files found matching the pattern {pattern} in {folder_path}")
 
+        # For each file
         for f in files:
-            # Read data (using the modern syntax to avoid the FutureWarning)
+            # Read its data
             data = pd.read_csv(f, comment='#', sep='\s+', header=None)
             
-            # 1. Extract raw state vectors
-            time = data.iloc[:, 1].values.astype(np.float32)
-            temp = data.iloc[:, 3].values.astype(np.float32)
-            hi   = data.iloc[:, 6].values.astype(np.float32)
-            hii  = data.iloc[:, 7].values.astype(np.float32)
+            # Extract its state vectors
+            t = data.iloc[:, 1].values.astype(np.float32)
+            T = data.iloc[:, 3].values.astype(np.float32)
+            nHI   = data.iloc[:, 6].values.astype(np.float32)
+            nHII  = data.iloc[:, 7].values.astype(np.float32)
 
-            # 2. Identify the Initial Condition (IC)
-            t0, hi0, hii0 = temp[0], hi[0], hii[0]
+            # Extract the Initial Conditions (first row of the file)
+            T0, nHI0, nHII0 = T[0], nHI[0], nHII[0]
 
-            # 3. Logarithmic Normalization (with safety floor to avoid log(0))
-            log_t = np.log10(np.maximum(time, 1e-20))
-            log_temp = np.log10(np.maximum(temp, 1e-20))
-            log_hi = np.log10(np.maximum(hi, 1e-20))
-            log_hii = np.log10(np.maximum(hii, 1e-20))
-            
-            # Calculate the scalar values first
-            val_t0 = np.log10(np.maximum(t0, 1e-20))
-            val_hi0 = np.log10(np.maximum(hi0, 1e-20))
-            val_hii0 = np.log10(np.maximum(hii0, 1e-20))
+            # Logarithmic Normalisation (with safety floor to avoid log(0))
 
-            # Turn them into arrays of the same length as log_t
-            log_t0 = np.full_like(log_t, val_t0)
-            log_hi0 = np.full_like(log_t, val_hi0)
-            log_hii0 = np.full_like(log_t, val_hii0)
+            # // ---- Inputs [t, T0, HI0, HII0] for every timestep t ---- \\
+            # Log of the ICs.
+            val_T0 = np.log10(np.maximum(T0, 1e-20))
+            val_nHI0 = np.log10(np.maximum(nHI0, 1e-20))
+            val_nHII0 = np.log10(np.maximum(nHII0, 1e-20))
 
-            # Stack into (N, 4) and (N, 3)
-            file_inputs = np.stack([log_t, log_t0, log_hi0, log_hii0], axis=1)
-            file_targets = np.stack([log_temp, log_hi, log_hii], axis=1)
+            # Turn the ICs into possible inputs of the PINN --> arrays of size #timesteps
+            log_t = np.log10(np.maximum(t, 1e-20))
+            log_T0 = np.full_like(log_t, val_T0)
+            log_nHI0 = np.full_like(log_t, val_nHI0)
+            log_nHII0 = np.full_like(log_t, val_nHII0)
+
+            # Stack into (N, 4)
+            file_inputs = np.stack([log_t, log_T0, log_nHI0, log_nHII0], axis=1)
+            # [log_t0, log_T0, log_HI0, log_HII0] (input at time t0), [log_t1, log_T0, log_HI0, log_HII0] (input at time t1), ...
+
+            # // ---- Targets [T, nHI, nHII] for every timestep t ---- \\
+            log_T = np.log10(np.maximum(T, 1e-20))
+            log_nHI = np.log10(np.maximum(nHI, 1e-20))
+            log_nHII = np.log10(np.maximum(nHII, 1e-20))
+
+            # Stack into (N, 3)
+            file_targets = np.stack([log_T, log_nHI, log_nHII], axis=1)
+            # [log_T0, log_HI0, log_HII0] (output at time t0), [log_T1, log_HI1, log_HII1] (output at time t1), ...
+
+            # maybe no need to include outputs at t0, since they are the same as the ICs #
 
             self.all_inputs.append(file_inputs)
             self.all_targets.append(file_targets)
@@ -61,13 +71,16 @@ class GrackleDataset(Dataset):
 
         self.x_min = self.all_inputs.min(axis=0)[0]
         self.x_max = self.all_inputs.max(axis=0)[0]
+        
+        print("Pre-normalizing dataset...")
+        self.all_inputs = (self.all_inputs - self.x_min) / (self.x_max - self.x_min + 1e-8)
+        print("Dataset ready.")
 
     def __len__(self):
         return len(self.all_inputs)
 
     def __getitem__(self, idx):
-        x = (self.all_inputs[idx] - self.x_min) / (self.x_max - self.x_min + 1e-8)
-        return x, self.all_targets[idx]
+        return self.all_inputs[idx], self.all_targets[idx]
 
 
 

@@ -122,15 +122,18 @@ class PhysicsLossManager:
         Computes the residuals for all species.
         batch_x: [log10_t, log10_T0, log10_HI0, log10_HII0]
         """
+        if torch.isnan(preds).any():
+            print(f"DEBUG: 'preds' contains NaNs from the model output.")
+
         # Recover physical (log) values from normalized inputs
         # batch_x_norm = (x_log - x_min) / S_x  => x_log = x_norm * S_x + x_min
         batch_x_log = batch_x_norm * self.S_x + self.x_min
-        t_lin = 10**batch_x_log[:, 0:1] # Convert to linear time for physical rate calculations
+        t_lin = 10**batch_x_log[:, 0:1] + 1.0e-10 # Convert to linear time for physical rate calculations (+ small epsilon to avoid /0 in chain rule)
 
         # Forward pass
-        T_log, HI_log, HII_log = preds[:, 0:1], preds[:, 1:2], preds[:, 2:3]
+        T_log, HI_log, HII_log = torch.clamp(preds[:, 0:1], min=0.0, max=9.0), torch.clamp(preds[:, 1:2], min=-20.0, max=5.0), torch.clamp(preds[:, 2:3], min=-20.0, max=5.0)
         # HeI_log, HeII_log, HeIII_log = preds[:, 3:4], preds[:, 4:5], preds[:, 5:6]
-
+        
         # Convert to linear scale for physics calculations
         T = 10**T_log
         nHI = 10**HI_log
@@ -149,22 +152,21 @@ class PhysicsLossManager:
         #       // ----- 1. LHS (dn/dt and dT/dt)) ----- \\
 
         # Function for d(log10_y)/d(log10_t)
-        def get_log_grad(y_log, y_lin):
+        def get_log_grad(y_log):
             grad_norm = torch.autograd.grad(
                 y_log, batch_x_norm, grad_outputs=torch.ones_like(y_log),
                 create_graph=True, retain_graph=True
             )[0][:, 0:1]
 
             # Chain Rule for Normalization: d/dx = (1/S_x) * d/dx_norm
-            # Chain rule: dy/dt = (y/t) * dlogy/dlogt
             # S_x[0] is the scaling factor for Time
-            return (y_lin / t_lin) * (grad_norm / self.S_x[0].view(-1)[0])
+            return grad_norm / self.S_x[0].view(-1)[0]
 
         # With the previous, we have converted the log derivatives (since PINN 
         # is in log space) to linear derivatives (for physical loss functions):
-        dT_dt_net = get_log_grad(T_log, T) # dT/dt
-        dHI_dt_net = get_log_grad(HI_log, nHI) # dnHI/dt
-        dHII_dt_net = get_log_grad(HII_log, nHII) # dnHII/dt
+        dlogT_dlogt = get_log_grad(T_log) # dT/dt
+        dlogHI_dlogt = get_log_grad(HI_log) # dnHI/dt
+        dlogHII_dlogt = get_log_grad(HII_log) # dnHII/dt
 
 
         #       // ----- 2. RHS (k_{ij}*n_i*n_j) ----- \\
@@ -175,8 +177,8 @@ class PhysicsLossManager:
         HII_gain = rates['k1']*nHI*ne + rates['k7']*(nHI**2) # Terms contributing to the production of HII (and loss of HI)
         HI_gain = rates['k2']*nHII*ne # Term contributing to the production of HI (and loss of HII)
 
-        rhs_HI = HI_gain - HII_gain # k7*nHI*nHI - k1*nHI*ne - k2*nHII*ne
-        rhs_HII = HII_gain - HI_gain # k1*nHI*ne + k2*nHII*ne - k7*nHI*nHI
+        rhs_HI_lin = HI_gain - HII_gain # k7*nHI*nHI - k1*nHI*ne - k2*nHII*ne
+        rhs_HII_lin = HII_gain - HI_gain # k1*nHI*ne + k2*nHII*ne - k7*nHI*nHI
 
 
         # // --- 2.2. Thermal (Energy) residuals --- \\
@@ -193,13 +195,42 @@ class PhysicsLossManager:
         gamma = 5.0/3.0
         # mu = 1.0 // Ignored by now, but Lessandre noted that, since mu(T), the eqn. would need to be solved iteratively.
 
-        rhs_T = - (gamma-1) * lambda_tot / (n_tot * self.phys.k_B)
+        rhs_T_lin = - (gamma-1) * lambda_tot / (n_tot * self.phys.k_B)
+
+        # # --- THE TOTAL INSPECTION SYSTEM ---
+        # with torch.no_grad():
+        #     # 1. Check raw log-predictions
+        #     if T_log.max() > 15.0 or HI_log.max() > 10.0:
+        #         print(f"\n[!] PREDICTION OVERFLOW: T_log={T_log.max():.2f}, HI_log={HI_log.max():.2f}")
+
+        #     # 2. Check linear values (The values that actually enter the rates)
+        #     if T.max() > 1e15:
+        #         print(f"[!] LINEAR TEMP EXPLOSION: T={T.max():.2e}")
+
+        #     # 3. Check the "Scaling Multipliers" (t/y)
+        #     # This is often where the 10^28 comes from
+        #     T_scale = (t_lin / (T + 1e-20)).max()
+        #     HI_scale = (t_lin / (nHI + 1e-20)).max()
+        #     if T_scale > 1e20:
+        #         print(f"[!] MULTIPLIER EXPLOSION: t/T scale = {T_scale:.2e}")
+
+        #     # 4. Check the Linear RHS (The Grackle physics output)
+        #     if rhs_T_lin.abs().max() > 1e20:
+        #         print(f"[!] PHYSICS RHS EXPLOSION: rhs_T={rhs_T_lin.abs().max():.2e}")
+        
+        # # --- END INSPECTION ---
 
         
-        # // ----- 3. Final computation of (relative) residuals (MSE) ----- \\
-        eps = 1e-20
-        loss_HI = torch.mean(((dHI_dt_net - rhs_HI) / (torch.abs(rhs_HI) + eps))**2)
-        loss_HII = torch.mean(((dHII_dt_net - rhs_HII) / (torch.abs(rhs_HII) + eps))**2)
-        loss_T = torch.mean(((dT_dt_net - rhs_T) / (torch.abs(rhs_T) + eps))**2)
+        # // ----- 3. Log-Space residuals ----- \\
+        # Multiply linear RHS by (t/y) to match the LHS log-derivatives.
+        eps = 1e-8
+
+        rhs_HI_log  = rhs_HI_lin  * (t_lin / (nHI + eps))
+        rhs_HII_log = rhs_HII_lin * (t_lin / (nHII + eps))
+        rhs_T_log   = rhs_T_lin   * (t_lin / (T + eps))
+    
+        loss_HI = torch.mean(((dlogHI_dlogt - rhs_HI_log) / (torch.abs(rhs_HI_log) + eps))**2)
+        loss_HII = torch.mean(((dlogHII_dlogt - rhs_HII_log) / (torch.abs(rhs_HII_log) + eps))**2)
+        loss_T = torch.mean(((dlogT_dlogt - rhs_T_log) / (torch.abs(rhs_T_log) + eps))**2)
 
         return loss_HI + loss_HII + loss_T

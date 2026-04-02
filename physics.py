@@ -110,23 +110,26 @@ class GrackleRates:
 
 class PhysicsLossManager:
     """Manages Automatic Differentiation and Residual computation."""
-    def __init__(self, model, grackle_phys):
+    def __init__(self, model, grackle_phys, x_min, x_max):
         self.model = model
         self.phys = grackle_phys
+        self.x_min = x_min
+        self.x_max = x_max
+        self.S_x = x_max - x_min
 
-    def get_residuals(self, batch_x):
+    def get_residuals(self, batch_x_norm, preds):
         """
         Computes the residuals for all species.
         batch_x: [log10_t, log10_T0, log10_HI0, log10_HII0]
         """
-        batch_x.requires_grad = True
-        t_log = batch_x[:, 0:1] # Extract log10(t)
-        t_lin = 10**t_log # Convert to linear time for physical rate calculations
+        # Recover physical (log) values from normalized inputs
+        # batch_x_norm = (x_log - x_min) / S_x  => x_log = x_norm * S_x + x_min
+        batch_x_log = batch_x_norm * self.S_x + self.x_min
+        t_lin = 10**batch_x_log[:, 0:1] # Convert to linear time for physical rate calculations
 
         # Forward pass
-        pred_log = self.model(batch_x)
-        T_log, HI_log, HII_log = pred_log[:, 0:1], pred_log[:, 1:2], pred_log[:, 2:3]
-        # HeI_log, HeII_log, HeIII_log = pred_log[:, 3:4], pred_log[:, 4:5], pred_log[:, 5:6]
+        T_log, HI_log, HII_log = preds[:, 0:1], preds[:, 1:2], preds[:, 2:3]
+        # HeI_log, HeII_log, HeIII_log = preds[:, 3:4], preds[:, 4:5], preds[:, 5:6]
 
         # Convert to linear scale for physics calculations
         T = 10**T_log
@@ -146,17 +149,22 @@ class PhysicsLossManager:
         #       // ----- 1. LHS (dn/dt and dT/dt)) ----- \\
 
         # Function for d(log10_y)/d(log10_t)
-        def get_log_grad(y_log):
-            return torch.autograd.grad(
-                y_log, batch_x, grad_outputs=torch.ones_like(y_log),
+        def get_log_grad(y_log, y_lin):
+            grad_norm = torch.autograd.grad(
+                y_log, batch_x_norm, grad_outputs=torch.ones_like(y_log),
                 create_graph=True, retain_graph=True
             )[0][:, 0:1]
 
-        # Convert log derivatives (since PINN is in log space) to linear derivatives (for physical loss functions):
-        # Chain rule: dy/dt = (y/t) * dlogy/dlogt
-        dT_dt_net = (T / t_lin) * get_log_grad(T_log) # dT/dt
-        dHI_dt_net = (nHI / t_lin) * get_log_grad(HI_log) # dnHI/dt
-        dHII_dt_net = (nHII / t_lin) * get_log_grad(HII_log) # dnHII/dt
+            # Chain Rule for Normalization: d/dx = (1/S_x) * d/dx_norm
+            # Chain rule: dy/dt = (y/t) * dlogy/dlogt
+            # S_x[0] is the scaling factor for Time
+            return (y_lin / t_lin) * (grad_norm / self.S_x[0].view(-1)[0])
+
+        # With the previous, we have converted the log derivatives (since PINN 
+        # is in log space) to linear derivatives (for physical loss functions):
+        dT_dt_net = get_log_grad(T_log, T) # dT/dt
+        dHI_dt_net = get_log_grad(HI_log, nHI) # dnHI/dt
+        dHII_dt_net = get_log_grad(HII_log, nHII) # dnHII/dt
 
 
         #       // ----- 2. RHS (k_{ij}*n_i*n_j) ----- \\
@@ -188,9 +196,10 @@ class PhysicsLossManager:
         rhs_T = - (gamma-1) * lambda_tot / (n_tot * self.phys.k_B)
 
         
-        # // ----- 3. Final computation of residuals (MSE) ----- \\
-        loss_HI = torch.mean((dHI_dt_net - rhs_HI)**2)
-        loss_HII = torch.mean((dHII_dt_net - rhs_HII)**2)
-        loss_T = torch.mean((dT_dt_net - rhs_T)**2)
+        # // ----- 3. Final computation of (relative) residuals (MSE) ----- \\
+        eps = 1e-20
+        loss_HI = torch.mean(((dHI_dt_net - rhs_HI) / (torch.abs(rhs_HI) + eps))**2)
+        loss_HII = torch.mean(((dHII_dt_net - rhs_HII) / (torch.abs(rhs_HII) + eps))**2)
+        loss_T = torch.mean(((dT_dt_net - rhs_T) / (torch.abs(rhs_T) + eps))**2)
 
         return loss_HI + loss_HII + loss_T

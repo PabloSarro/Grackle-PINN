@@ -2,40 +2,88 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
+import glob
+import os
 
 class GrackleDataset(Dataset):
-    def __init__(self, file_path):
+    def __init__(self, folder_path, pattern="output_*.dat"):
         """
-        Reads Grackle .dat files and provides normalized tensors for PINN training.
+        Load multiple Grackle simulations (will be our inputs).
+        PINN's input  (x): [log10(t), log10(T0), log10(HI0), log10(HII0)]
+        PINN's output (y): [log10(T), log10(HI), log10(HII)]
         """
-        # Read file, dropping the '#' header lines
-        data = pd.read_csv(file_path, comment='#', delim_whitespace=True, header=None)
+        self.all_inputs = []
+        self.all_targets = []
         
-        # Rigorous column mapping via integer indices
-        time = data.iloc[:, 1].values.astype(np.float32)
-        temp = data.iloc[:, 3].values.astype(np.float32)
-        hi   = data.iloc[:, 6].values.astype(np.float32)
-        hii  = data.iloc[:, 7].values.astype(np.float32)
+        # Search for all files that match the pattern
+        files = glob.glob(os.path.join(folder_path, pattern))
+        if not files:
+            raise FileNotFoundError(f"No files found matching the pattern {pattern} in {folder_path}")
 
-        # Preprocessing: Strict logarithmic scaling with hard floors
-        # Utilizing np.maximum to prevent log10(0)
-        self.t_norm = np.log10(np.maximum(time, 1e-20)) 
-        
-        # Stack targets into a single [N, 3] matrix for vectorized PINN loss
-        y_raw = np.stack([temp, hi, hii], axis=1)
-        self.y_norm = np.log10(np.maximum(y_raw, 1e-20))
+        for f in files:
+            # Read data (using the modern syntax to avoid the FutureWarning)
+            data = pd.read_csv(f, comment='#', sep='\s+', header=None)
+            
+            # 1. Extract raw state vectors
+            time = data.iloc[:, 1].values.astype(np.float32)
+            temp = data.iloc[:, 3].values.astype(np.float32)
+            hi   = data.iloc[:, 6].values.astype(np.float32)
+            hii  = data.iloc[:, 7].values.astype(np.float32)
+
+            # 2. Identify the Initial Condition (IC)
+            t0, hi0, hii0 = temp[0], hi[0], hii[0]
+
+            # 3. Logarithmic Normalization (with safety floor to avoid log(0))
+            log_t = np.log10(np.maximum(time, 1e-20))
+            log_temp = np.log10(np.maximum(temp, 1e-20))
+            log_hi = np.log10(np.maximum(hi, 1e-20))
+            log_hii = np.log10(np.maximum(hii, 1e-20))
+            
+            # Calculate the scalar values first
+            val_t0 = np.log10(np.maximum(t0, 1e-20))
+            val_hi0 = np.log10(np.maximum(hi0, 1e-20))
+            val_hii0 = np.log10(np.maximum(hii0, 1e-20))
+
+            # Turn them into arrays of the same length as log_t
+            log_t0 = np.full_like(log_t, val_t0)
+            log_hi0 = np.full_like(log_t, val_hi0)
+            log_hii0 = np.full_like(log_t, val_hii0)
+
+            # Stack into (N, 4) and (N, 3)
+            file_inputs = np.stack([log_t, log_t0, log_hi0, log_hii0], axis=1)
+            file_targets = np.stack([log_temp, log_hi, log_hii], axis=1)
+
+            self.all_inputs.append(file_inputs)
+            self.all_targets.append(file_targets)
+
+        self.all_inputs = torch.from_numpy(np.concatenate(self.all_inputs, axis=0)).float()
+        self.all_targets = torch.from_numpy(np.concatenate(self.all_targets, axis=0)).float()
+
+        self.x_min = self.all_inputs.min(axis=0)[0]
+        self.x_max = self.all_inputs.max(axis=0)[0]
 
     def __len__(self):
-        return len(self.t_norm)
+        return len(self.all_inputs)
 
     def __getitem__(self, idx):
-        """
-        Returns (x, y) where:
-        x: Time tensor [1]
-        y: State tensor [Temp, HI, HII] [3]
-        All data is kept on CPU here to allow num_workers > 0 in DataLoader.
-        """
-        t_tensor = torch.tensor([self.t_norm[idx]], dtype=torch.float32)
-        y_tensor = torch.tensor(self.y_norm[idx], dtype=torch.float32)
+        x = (self.all_inputs[idx] - self.x_min) / (self.x_max - self.x_min + 1e-8)
+        return x, self.all_targets[idx]
+
+
+
+
+# Test block
+if __name__ == "__main__":
+    # Make sure you have output_1.dat and output_2.dat in the current folder before running this test
+    try:
+        ds = GrackleDataset(folder_path=".")
+        print(f"✓ Dataset multi-file loaded: {len(ds)} total data points.")
         
-        return t_tensor, y_tensor
+        x, y = ds[0]
+        print(f"✓ Example of input (t, T0, HI0, HII0): {x.numpy()}")
+        print(f"✓ Example of output  (T, HI, HII): {y.numpy()}")
+        
+        if x.shape[0] != 4:
+            print("✗ Error: The input dimension should be 4.")
+    except Exception as e:
+        print(f"✗ Error: {e}")

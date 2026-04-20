@@ -110,29 +110,35 @@ class GrackleRates:
 
 class PhysicsLossManager:
     """Manages Automatic Differentiation and Residual computation."""
-    def __init__(self, model, grackle_phys, x_min, x_max):
+    def __init__(self, model, grackle_phys, x_min, x_max, y_min, y_max):
         self.model = model
         self.phys = grackle_phys
+        
         self.x_min = x_min
         self.x_max = x_max
         self.S_x = x_max - x_min
 
-    def get_residuals(self, batch_x_norm, preds):
+        self.y_min = y_min
+        self.y_max = y_max
+        self.S_y = y_max - y_min
+
+    def get_residuals(self, batch_x_norm, preds_norm):
         """
         Computes the residuals for all species.
         batch_x: [log10_t, log10_T0, log10_HI0, log10_HII0]
         """
-        if torch.isnan(preds).any():
-            print(f"DEBUG: 'preds' contains NaNs from the model output.")
+        if torch.isnan(preds_norm).any():
+            print(f"DEBUG: 'preds_norm' contains NaNs from the model output.")
 
         # Recover physical (log) values from normalized inputs
-        # batch_x_norm = (x_log - x_min) / S_x  => x_log = x_norm * S_x + x_min
+        # batch_x_norm = (x_log - x_min) / S_x  => x_log = batch_x_norm * S_x + x_min
         batch_x_log = batch_x_norm * self.S_x + self.x_min
         t_lin = 10**batch_x_log[:, 0:1] + 1.0e-10 # Convert to linear time for physical rate calculations (+ small epsilon to avoid /0 in chain rule)
+        preds_log = preds_norm * self.S_y + self.y_min
 
         # Forward pass
-        T_log, HI_log, HII_log = torch.clamp(preds[:, 0:1], min=0.0, max=9.0), torch.clamp(preds[:, 1:2], min=-20.0, max=5.0), torch.clamp(preds[:, 2:3], min=-20.0, max=5.0)
-        # HeI_log, HeII_log, HeIII_log = preds[:, 3:4], preds[:, 4:5], preds[:, 5:6]
+        T_log, HI_log, HII_log = torch.clamp(preds_log[:, 0:1], min=0.0, max=9.0), torch.clamp(preds_log[:, 1:2], min=-20.0, max=5.0), torch.clamp(preds_log[:, 2:3], min=-20.0, max=5.0)
+        # HeI_log, HeII_log, HeIII_log = preds_log[:, 3:4], preds_log[:, 4:5], preds_log[:, 5:6]
         
         # Convert to linear scale for physics calculations
         T = 10**T_log
@@ -225,10 +231,10 @@ class PhysicsLossManager:
         # Multiply linear RHS by (t/y) to match the LHS log-derivatives.
         eps = 1e-8
 
-        rhs_HI_log  = rhs_HI_lin  * (t_lin / (nHI + eps))
-        rhs_HII_log = rhs_HII_lin * (t_lin / (nHII + eps))
-        rhs_T_log   = rhs_T_lin   * (t_lin / (T + eps))
-    
+        rhs_HI_log  = rhs_HI_lin  * torch.clamp(t_lin / (nHI + eps), max=1e10) # To avoid exploding multipliers when time is high and species densities get low
+        rhs_HII_log = rhs_HII_lin * torch.clamp(t_lin / (nHII + eps), max=1e10)
+        rhs_T_log   = rhs_T_lin   * torch.clamp(t_lin / (T + eps), max=1e10)
+
         loss_HI = torch.mean(((dlogHI_dlogt - rhs_HI_log) / (torch.abs(rhs_HI_log) + eps))**2)
         loss_HII = torch.mean(((dlogHII_dlogt - rhs_HII_log) / (torch.abs(rhs_HII_log) + eps))**2)
         loss_T = torch.mean(((dlogT_dlogt - rhs_T_log) / (torch.abs(rhs_T_log) + eps))**2)

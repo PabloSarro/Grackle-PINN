@@ -11,10 +11,12 @@ import time
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
-DATA_PATH = "Grackle_GTs/"    # Path where output_*.dat are located
-BATCH_SIZE = 16384
+MODEL_NAME = "PINN.pth"
+DATA_PATH = "Old_Grackle_GTs/"    # Path where output_*.dat are located
+
+BATCH_SIZE = 16384 # 8192
 LEARNING_RATE = 1.0e-4
-EPOCHS = 1000
+EPOCHS = 5
 LAMBDA_PHYS = 1.0
 
 # Data Loading
@@ -26,17 +28,24 @@ dataloader = DataLoader(
     num_workers=4,
     pin_memory=True
 )
-torch.save({'x_min': dataset.x_min, 'x_max': dataset.x_max}, "scaling_params.pth")
-print("Scaling parameters saved to scaling_params.pth")
+torch.save({
+    'x_min': dataset.x_min,
+    'x_max': dataset.x_max,
+    'y_min': dataset.y_min,
+    'y_max': dataset.y_max
+}, f"scaling_params_{MODEL_NAME}")
+print(f"Scaling parameters saved to scaling_params_{MODEL_NAME}")
 
 # Model, Optimiser, and Loss
-model = PINN(input_dim=4, output_dim=3, hidden_dim=128, num_layers=8).to(device)
+model = PINN(input_dim=4, output_dim=3, hidden_dim=128, hidden_layers=8).to(device)
 grackle_phys = GrackleRates()
 phys_manager = PhysicsLossManager(
     model, 
     grackle_phys, 
     x_min=dataset.x_min.to(device), 
-    x_max=dataset.x_max.to(device)
+    x_max=dataset.x_max.to(device),
+    y_min=dataset.y_min.to(device),
+    y_max=dataset.y_max.to(device)
 )
 optimiser = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 criterion = nn.MSELoss()
@@ -133,5 +142,5 @@ for epoch in range(EPOCHS):
 
 end_time = time.time()
 print(f"Training complete in {end_time - start_time:.2f} seconds.")
-torch.save(model.state_dict(), "PINN.pth")
-print("Training complete. Model saved as PINN.pth")
+torch.save(model.state_dict(), MODEL_NAME)
+print(f"Training complete. Model saved as {MODEL_NAME}")

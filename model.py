@@ -2,18 +2,20 @@ import torch
 import torch.nn as nn
 
 class PINN(nn.Module):
-    def __init__(self, input_dim=4, output_dim=3, hidden_dim=128, num_layers=8):
+    def __init__(self, input_dim=4, output_dim=3, hidden_dim=128, hidden_layers=8):
         """
         Optimised PINN to solve coupled ODEs.
         
         Args:
             input_dim (int): Dimension of the input tensor. Set to 4: [t, T0, HI0, HII0] 
             output_dim (int): Dimension of the output tensor. Set to 3: [T, HI, HII]
+            hidden_dim (int): Number of neurons in each hidden layer.
+            hidden_layers (int): Number of hidden layers in the network.
         """
         super().__init__()
         
         layers = [nn.Linear(input_dim, hidden_dim), nn.Tanh()]
-        for _ in range(num_layers - 1):
+        for _ in range(hidden_layers):
             layers += [nn.Linear(hidden_dim, hidden_dim), nn.Tanh()]
         layers.append(nn.Linear(hidden_dim, output_dim))
         
@@ -27,7 +29,16 @@ class PINN(nn.Module):
                 nn.init.zeros_(m.bias)
 
     def forward(self, x):
-        return self.net(x)
+        # To enforce the initial conditions, we format the PINN as follows:
+        #   y(t) = y0 + t·PINN(t,y), 
+        # where y0 is the initial condition and PINN(t,y) is the output of the network.
+        y0 = x[:, 1:]
+        t = x[:, 0:1]
+        PINN = self.net(x)
+        # print("y0=",y0)
+        # print("t=",t)
+        # print("PINN=",PINN)
+        return y0 + t*PINN
 
 # ---------------------------------------------------------
 # Testing block

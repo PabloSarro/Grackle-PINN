@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 class PINN(nn.Module):
-    def __init__(self, input_dim=4, output_dim=3, hidden_dim=64, num_layers=4):
+    def __init__(self, input_dim=4, output_dim=3, hidden_dim=128, num_layers=8):
         """
         Optimised PINN to solve coupled ODEs.
         

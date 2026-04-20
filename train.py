@@ -12,10 +12,10 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 DATA_PATH = "Grackle_GTs/"    # Path where output_*.dat are located
-BATCH_SIZE = 8192
-LEARNING_RATE = 5e-4
-EPOCHS = 100
-LAMBDA_PHYS = 1.0e-4  # Weight used for the physics loss
+BATCH_SIZE = 16384
+LEARNING_RATE = 1.0e-4
+EPOCHS = 1000
+LAMBDA_PHYS = 1.0
 
 # Data Loading
 dataset = GrackleDataset(folder_path=DATA_PATH)
@@ -30,7 +30,7 @@ torch.save({'x_min': dataset.x_min, 'x_max': dataset.x_max}, "scaling_params.pth
 print("Scaling parameters saved to scaling_params.pth")
 
 # Model, Optimiser, and Loss
-model = PINN(input_dim=4, output_dim=3).to(device)
+model = PINN(input_dim=4, output_dim=3, hidden_dim=128, num_layers=8).to(device)
 grackle_phys = GrackleRates()
 phys_manager = PhysicsLossManager(
     model, 

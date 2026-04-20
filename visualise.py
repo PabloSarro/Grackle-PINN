@@ -10,8 +10,8 @@ model = PINN(input_dim=4, output_dim=3).to(device)
 model.load_state_dict(torch.load("PINN.pth", map_location=device))
 model.eval()
 
-# 2. Load and Process output_100.dat
-df = pd.read_csv("output_100.dat", comment='#', sep='\s+', header=None)
+# 2. Load and Process output_4.dat
+df = pd.read_csv("Old_Grackle_GTs/output_2.dat", comment='#', sep='\s+', header=None)
 
 # Extract Ground Truth (GT)
 time_lin = df.iloc[:, 1].values.astype(np.float32)
@@ -32,10 +32,12 @@ scaling = torch.load("scaling_params.pth", map_location=device)
 x_min_train = scaling['x_min'].cpu().numpy()
 x_max_train = scaling['x_max'].cpu().numpy()
 inputs_norm = (inputs_log - x_min_train) / (x_max_train - x_min_train + 1e-8)
+print(f"Max values: {x_max_train}; Min values: {x_min_train}")
 
 # 3. Model Prediction
 inputs_tensor = torch.from_numpy(inputs_norm).float().to(device)
 with torch.no_grad():
+    print(f"Normalized Time Range: {inputs_norm[:, 0].min():.4f} to {inputs_norm[:, 0].max():.4f}")
     preds_log = model(inputs_tensor).cpu().numpy()
 
 # Convert back to linear scale
@@ -77,6 +79,6 @@ axes[2].set_ylabel("Density [cm^-3]")
 axes[2].legend()
 
 plt.tight_layout()
-plt.savefig("pinn_performance.png")
-print("Visualisation saved as pinn_performance.png")
+plt.savefig("pinn_performance_things.png")
+print("Visualisation saved as pinn_performance_things.png")
 plt.show()

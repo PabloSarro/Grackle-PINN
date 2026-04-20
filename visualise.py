@@ -4,14 +4,20 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from model import PINN
 
+# Define the model, parameter file and validation file.
+model_name = "PINN.pth"
+sc_param_file = "scaling_params.pth"
+valid_file = "Grackle_GTs/output_10.dat"
+plot_name = "pinn_performance.png"
+
 # 1. Setup and Load Model
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = PINN(input_dim=4, output_dim=3).to(device)
-model.load_state_dict(torch.load("PINN.pth", map_location=device))
+model = PINN().to(device)
+model.load_state_dict(torch.load(model_name, map_location=device))
 model.eval()
 
-# 2. Load and Process output_4.dat
-df = pd.read_csv("Old_Grackle_GTs/output_2.dat", comment='#', sep='\s+', header=None)
+# 2. Load and Process the validation file
+df = pd.read_csv(valid_file, comment='#', sep='\s+', header=None)
 
 # Extract Ground Truth (GT)
 time_lin = df.iloc[:, 1].values.astype(np.float32)
@@ -28,7 +34,7 @@ log_HII0 = np.full_like(log_t, np.log10(np.maximum(HII_lin[0], 1e-20)))
 inputs_log = np.stack([log_t, log_T0, log_HI0, log_HII0], axis=1)
 
 # Normalisation
-scaling = torch.load("scaling_params.pth", map_location=device)
+scaling = torch.load(sc_param_file, map_location=device)
 x_min_train = scaling['x_min'].cpu().numpy()
 x_max_train = scaling['x_max'].cpu().numpy()
 inputs_norm = (inputs_log - x_min_train) / (x_max_train - x_min_train + 1e-8)
@@ -79,6 +85,6 @@ axes[2].set_ylabel("Density [cm^-3]")
 axes[2].legend()
 
 plt.tight_layout()
-plt.savefig("pinn_performance_things.png")
-print("Visualisation saved as pinn_performance_things.png")
+plt.savefig(plot_name)
+print(f"Visualisation saved as {plot_name}")
 plt.show()

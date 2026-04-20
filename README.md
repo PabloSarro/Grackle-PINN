@@ -13,9 +13,7 @@ Before training the neural network, you must generate the Ground Truth (GT) data
 Ensure you have the required dependencies installed on the EPFL Izar cluster or your local machine:
 
 ```bash
-# Recommended: Use a virtual environment
-source EnvPablo/bin/activate
-pip install torch numpy pandas matplotlib
+pip install -r requirements.txt
 ```
 
 ### 3. Model Training

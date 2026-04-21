@@ -43,13 +43,13 @@ class GrackleDataset(Dataset):
             val_nHII0 = np.log10(np.maximum(nHII0, 1e-20))
 
             # Turn the ICs into possible inputs of the PINN --> arrays of size #timesteps
-            log_t = np.log10(np.maximum(t, 1e-20))
-            log_T0 = np.full_like(log_t, val_T0)
-            log_nHI0 = np.full_like(log_t, val_nHI0)
-            log_nHII0 = np.full_like(log_t, val_nHII0)
+            t_lin = t.astype(np.float32)
+            log_T0 = np.full_like(t_lin, val_T0)
+            log_nHI0 = np.full_like(t_lin, val_nHI0)
+            log_nHII0 = np.full_like(t_lin, val_nHII0)
 
             # Stack into (N, 4)
-            file_inputs = np.stack([log_t, log_T0, log_nHI0, log_nHII0], axis=1)
+            file_inputs = np.stack([t_lin, log_T0, log_nHI0, log_nHII0], axis=1)
             # [log_t0, log_T0, log_HI0, log_HII0] (input at time t0), 
             # [log_t1, log_T0, log_HI0, log_HII0] (input at time t1), 
             # [log_t2, log_T0, log_HI0, log_HII0] (input at time t2), ...
@@ -90,6 +90,13 @@ class GrackleDataset(Dataset):
         # In this way, the PINN learns to predict values that are on the same scale as the targets.
         self.x_min[1:] = self.y_min
         self.x_max[1:] = self.y_max
+
+        print("\n--- SCALING DEBUG ---")
+        print(f"x_min: {self.x_min.numpy()}")
+        print(f"x_max: {self.x_max.numpy()}")
+        print(f"y_min: {self.y_min.numpy()}")
+        print(f"y_max: {self.y_max.numpy()}")
+        print("--- END SCALING DEBUG ---\n")
 
         self.all_inputs = (self.all_inputs - self.x_min) / (self.x_max - self.x_min + 1e-8)
         self.all_targets = (self.all_targets - self.y_min) / (self.y_max - self.y_min + 1e-8)

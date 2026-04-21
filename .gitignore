@@ -10,7 +10,6 @@ EnvPablo/
 # --- Simulation Data (CRITICAL) ---
 # The 10 million samples are way too big for Git
 *.dat
-*.txt
 *.csv
 *.log
 *.out

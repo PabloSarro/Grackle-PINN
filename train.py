@@ -12,12 +12,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 MODEL_NAME = "PINN.pth"
-DATA_PATH = "Old_Grackle_GTs/"    # Path where output_*.dat are located
+DATA_PATH = "Grackle_GTs/"    # Path where output_*.dat are located
 
-BATCH_SIZE = 16384 # 8192
+BATCH_SIZE = 8192 # 16384
 LEARNING_RATE = 1.0e-4
-EPOCHS = 5
-LAMBDA_PHYS = 1.0
+EPOCHS = 50
+LAMBDA_PHYS = 10.0
 
 # Data Loading
 dataset = GrackleDataset(folder_path=DATA_PATH)
@@ -129,7 +129,7 @@ for epoch in range(EPOCHS):
         # (Do this only if the main loss is NaN)
         
         # Gradient Clipping
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # max_norm usually set to 0.5 to 10 times the average gradient norm. Consider increasing to 10 or 20 if PINN clips gradients too aggressively.
         optimiser.step()
         
         total_data_loss += loss_data.item()

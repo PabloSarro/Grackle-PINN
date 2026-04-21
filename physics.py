@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 
 class GrackleRates:
     """Analytical fits for Grackle primordial chemistry and cooling."""
@@ -131,9 +132,6 @@ class PhysicsLossManager:
             print(f"DEBUG: 'preds_norm' contains NaNs from the model output.")
 
         # Recover physical (log) values from normalized inputs
-        # batch_x_norm = (x_log - x_min) / S_x  => x_log = batch_x_norm * S_x + x_min
-        batch_x_log = batch_x_norm * self.S_x + self.x_min
-        t_lin = 10**batch_x_log[:, 0:1] + 1.0e-10 # Convert to linear time for physical rate calculations (+ small epsilon to avoid /0 in chain rule)
         preds_log = preds_norm * self.S_y + self.y_min
 
         # Forward pass
@@ -157,22 +155,23 @@ class PhysicsLossManager:
 
         #       // ----- 1. LHS (dn/dt and dT/dt)) ----- \\
 
-        # Function for d(log10_y)/d(log10_t)
-        def get_log_grad(y_log):
+        # Function for d(log10_y)/dt
+        def get_phys_grad(y_log, target_idx):
+            # grad_norm is d(y_log_norm) / d(t_lin_norm)
             grad_norm = torch.autograd.grad(
                 y_log, batch_x_norm, grad_outputs=torch.ones_like(y_log),
                 create_graph=True, retain_graph=True
             )[0][:, 0:1]
 
-            # Chain Rule for Normalization: d/dx = (1/S_x) * d/dx_norm
-            # S_x[0] is the scaling factor for Time
-            return grad_norm / self.S_x[0].view(-1)[0]
+            # Chain rule: d(y_log)/dt = (S_y / S_t) * d(y_norm)/d(t_norm)
+            # self.S_x[0] is the scaling factor for Time (t_max - t_min)
+            return (grad_norm * self.S_y[target_idx]) / self.S_x[0]
 
         # With the previous, we have converted the log derivatives (since PINN 
         # is in log space) to linear derivatives (for physical loss functions):
-        dlogT_dlogt = get_log_grad(T_log) # dT/dt
-        dlogHI_dlogt = get_log_grad(HI_log) # dnHI/dt
-        dlogHII_dlogt = get_log_grad(HII_log) # dnHII/dt
+        dlogT_dt = get_phys_grad(T_log, target_idx=0) # dT/dt
+        dlogHI_dt = get_phys_grad(HI_log, target_idx=1) # dnHI/dt
+        dlogHII_dt = get_phys_grad(HII_log, target_idx=2) # dnHII/dt
 
 
         #       // ----- 2. RHS (k_{ij}*n_i*n_j) ----- \\
@@ -230,13 +229,15 @@ class PhysicsLossManager:
         # // ----- 3. Log-Space residuals ----- \\
         # Multiply linear RHS by (t/y) to match the LHS log-derivatives.
         eps = 1e-8
+        ln10 = np.log(10.0)
 
-        rhs_HI_log  = rhs_HI_lin  * torch.clamp(t_lin / (nHI + eps), max=1e10) # To avoid exploding multipliers when time is high and species densities get low
-        rhs_HII_log = rhs_HII_lin * torch.clamp(t_lin / (nHII + eps), max=1e10)
-        rhs_T_log   = rhs_T_lin   * torch.clamp(t_lin / (T + eps), max=1e10)
+        # Transform RHS: dy_log/dt = (1 / (y_lin * ln10)) * dy_lin/dt
+        rhs_HI_log  = rhs_HI_lin  / (torch.clamp(nHI, min=1e-10) * ln10)
+        rhs_HII_log = rhs_HII_lin / (torch.clamp(nHII, min=1e-10) * ln10)
+        rhs_T_log   = rhs_T_lin   / (torch.clamp(T, min=1.0) * ln10)
 
-        loss_HI = torch.mean(((dlogHI_dlogt - rhs_HI_log) / (torch.abs(rhs_HI_log) + eps))**2)
-        loss_HII = torch.mean(((dlogHII_dlogt - rhs_HII_log) / (torch.abs(rhs_HII_log) + eps))**2)
-        loss_T = torch.mean(((dlogT_dlogt - rhs_T_log) / (torch.abs(rhs_T_log) + eps))**2)
+        loss_HI = torch.mean(((dlogHI_dt - rhs_HI_log) / (torch.abs(rhs_HI_log) + eps))**2)
+        loss_HII = torch.mean(((dlogHII_dt - rhs_HII_log) / (torch.abs(rhs_HII_log) + eps))**2)
+        loss_T = torch.mean(((dlogT_dt - rhs_T_log) / (torch.abs(rhs_T_log) + eps))**2)
 
         return loss_HI + loss_HII + loss_T

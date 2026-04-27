@@ -3,12 +3,12 @@ import torch
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from model import PINN
+from model_nophys import PINN
 
 # Define the model, parameter file and validation file.
-MODEL_NAME = "PINN.pth"
-VALID_FILES = [f"Grackle_GTs/output_{i}.dat" for i in range(1,6)]
-PLOT_NAMES = [f"pinn_performance_{i}.png" for i in range(1,6)]
+MODEL_NAME = "PINN_no_phys_1.pth"
+VALID_FILES = [f"../Grackle_GTs/output_{i}.dat" for i in range(1,6)]
+PLOT_NAMES = [f"pinn_no_phys_performance_{i}.png" for i in range(1,6)]
 
 # 1. Setup and Load Model
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

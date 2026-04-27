@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.optim as optim
 from torch.utils.data import DataLoader
 from data_utils import GrackleDataset
 from model import PINN
@@ -12,12 +11,13 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
 MODEL_NAME = "PINN.pth"
+BEST_NAME = "PINN_BEST.pth"
 DATA_PATH = "Grackle_GTs/"    # Path where output_*.dat are located
 
 BATCH_SIZE = 8192 # 16384
 LEARNING_RATE = 1.0e-4
-EPOCHS = 50
-LAMBDA_PHYS = 10.0
+EPOCHS = 250
+LAMBDA_PHYS = 1.0
 
 # Data Loading
 dataset = GrackleDataset(folder_path=DATA_PATH)
@@ -47,19 +47,24 @@ phys_manager = PhysicsLossManager(
     y_min=dataset.y_min.to(device),
     y_max=dataset.y_max.to(device)
 )
-optimiser = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+optimiser = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE) # DEBUG: Try Ethan's suggestion!
 criterion = nn.MSELoss()
 
 print(f"Starting training on {len(dataset)} points...")
 
 # 5. Training Loop
+best_loss = float('inf')
+
 start_time = time.time()
 for epoch in range(EPOCHS):
+    # print(f"Epoch {epoch+1}")
     model.train()
     total_data_loss = 0
     total_phys_loss = 0
-    
+    # batch_num = 0
     for batch_x, batch_y in dataloader:
+        # print(f"Batch {batch_num+1}")
+        # batch_num += 1
         # Move data to GPU
         batch_x = batch_x.to(device)
         batch_y = batch_y.to(device)
@@ -75,9 +80,9 @@ for epoch in range(EPOCHS):
         # Total combined loss with weighting
         loss = loss_data + LAMBDA_PHYS * loss_phys
 
-        # --- DEBUG BLOCK: train.py ---
+        # --- DEBUG BLOCK ---
         if torch.isnan(loss):
-            print(f"\n[!] NAN DETECTED at Epoch {epoch+1}")
+            print(f"\n[!] NAN DETECTED at Epoch {epoch+1}")#, Batch {batch_num}")
             print(f"Data Loss: {loss_data.item():.4e}")
             print(f"Phys Loss: {loss_phys.item():.4e}")
             print(f"Preds Max/Min: {predictions.max().item():.2f} / {predictions.min().item():.2f}")
@@ -139,8 +144,15 @@ for epoch in range(EPOCHS):
     avg_phys_loss = total_phys_loss / len(dataloader)
     print(f"Epoch [{epoch+1}/{EPOCHS}] - Avg Data Loss: {avg_data_loss:.6e}, Avg Physics Loss: {avg_phys_loss:.6e}")
 
+    # Save the best model so far.
+    avg_loss = avg_data_loss + LAMBDA_PHYS * avg_phys_loss
+    if avg_loss < best_loss:
+        best_loss = avg_loss
+        torch.save(model.state_dict(), BEST_NAME)
+        print(f"[✓] New best model saved (avg_loss={best_loss:.4e})")
+
 
 end_time = time.time()
 print(f"Training complete in {end_time - start_time:.2f} seconds.")
 torch.save(model.state_dict(), MODEL_NAME)
-print(f"Training complete. Model saved as {MODEL_NAME}")
+print(f"[✓] Final model saved (avg_loss={avg_loss:.4e})")

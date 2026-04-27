@@ -1,16 +1,19 @@
 import numpy as np
+import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
 import glob
 import os
 
+m_H = 1.6726219e-24  # Hydrogen Mass
+
 class GrackleDataset(Dataset):
     def __init__(self, folder_path, pattern="output_*.dat"):
         """
         Load multiple Grackle simulations (will be our inputs).
-        PINN's input  (x): [log10(t), log10(T0), log10(HI0), log10(HII0)]
-        PINN's output (y): [log10(T), log10(HI), log10(HII)]
+        PINN's input  (x): [t, log10(T0), log10(HI0), log10(HII0)] (normalised between 0 and 1)
+        PINN's output (y): [log10(T), log10(HI), log10(HII)] (normalised between 0 and 1)
         """
         self.all_inputs = []
         self.all_targets = []
@@ -22,14 +25,23 @@ class GrackleDataset(Dataset):
 
         # For each file
         for f in files:
-            # Read its data
+            # Extract the units used
+            with open(f, 'r') as header_file:
+                # Read only the first 4 lines
+                head = [header_file.readline() for _ in range(3)]
+            
+            mass_units = float(head[1].split(':')[1].split('[')[0]) # should be 1.98841e43
+            length_units = float(head[2].split(':')[1].split('[')[0]) # should be 3.08567758e24
+            density_units = mass_units / (length_units**3)
+            
+            # Extract the data
             data = pd.read_csv(f, comment='#', sep='\s+', header=None)
             
-            # Extract its state vectors
-            t = data.iloc[:, 1].values.astype(np.float32)
+            # Extract its state vectors, and convert to physical units
+            t = data.iloc[:, 1].values.astype(np.float32) # * SEC_PER_YEAR
             T = data.iloc[:, 3].values.astype(np.float32)
-            nHI   = data.iloc[:, 6].values.astype(np.float32)
-            nHII  = data.iloc[:, 7].values.astype(np.float32)
+            nHI   = data.iloc[:, 6].values.astype(np.float32) * density_units / m_H
+            nHII  = data.iloc[:, 7].values.astype(np.float32) * density_units / m_H
 
             # Extract the Initial Conditions (first row of the file)
             T0, nHI0, nHII0 = T[0], nHI[0], nHII[0]
@@ -50,9 +62,9 @@ class GrackleDataset(Dataset):
 
             # Stack into (N, 4)
             file_inputs = np.stack([t_lin, log_T0, log_nHI0, log_nHII0], axis=1)
-            # [log_t0, log_T0, log_HI0, log_HII0] (input at time t0), 
-            # [log_t1, log_T0, log_HI0, log_HII0] (input at time t1), 
-            # [log_t2, log_T0, log_HI0, log_HII0] (input at time t2), ...
+            # [t0, log_T0, log_HI0, log_HII0] (input at time t0), 
+            # [t1, log_T0, log_HI0, log_HII0] (input at time t1), 
+            # [t2, log_T0, log_HI0, log_HII0] (input at time t2), ...
 
             # // ---- Targets [T, nHI, nHII] for every timestep t ---- \\
             log_T = np.log10(np.maximum(T, 1e-20))
@@ -85,7 +97,7 @@ class GrackleDataset(Dataset):
         self.y_min = self.all_targets.min(axis=0)[0]
         self.y_max = self.all_targets.max(axis=0)[0]
 
-        # Note that inputs contain [log_t, log_T0, log_HI0, log_HII0], and outputs [log_T, log_HI, log_HII].
+        # Note that inputs contain [t, log_T0, log_HI0, log_HII0], and outputs [log_T, log_HI, log_HII].
         # Force the inputs at indices 1, 2, 3 to use the same scale as the targets (same physical quantities)
         # In this way, the PINN learns to predict values that are on the same scale as the targets.
         self.x_min[1:] = self.y_min
@@ -117,6 +129,15 @@ class GrackleDataset(Dataset):
         return self.all_inputs[idx], self.all_targets[idx]
 
 
+def DEBUG_helper(name, t, min_val=1e-10, max_val=1e10):
+    if torch.isnan(t).any():
+        print(f"[!] FATAL: '{name}' contains NaNs.")
+    elif torch.isinf(t).any():
+        print(f"[!] FATAL: '{name}' contains Inf.")
+    # elif t.max() > max_val:
+    #     print(f"[!] WARNING: '{name}' is too large! Max: {t.max():.2e}")
+    # elif t.min() < min_val:
+    #     print(f"[!] WARNING: '{name}' is too small! Min: {t.min():.2e}")
 
 
 # Test block

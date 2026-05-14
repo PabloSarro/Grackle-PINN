@@ -400,10 +400,10 @@ void write_header(FILE *fd) {
 
   fprintf(fd,
           "#%8s %15s %15s %15s %15s %15s %15s %15s %15s %15s %15s %15s %15s\n",
-          "step", "Time [yr]", "dt [yr]", "Temperature [K]", "Mean M Wgt",
-          "Tot dens [cm^-3]", "HI dens [cm^-3]", "HII dens [cm^-3]", "HeI dens [cm^-3]",
-          "HeII dens [cm^-3]", "HeIII dens [cm^-3]", "e- n. dens [cm^-3]",
-          "IntrnEnerg [erg/g=cm^2/s^2]");
+          "step", "Time [yr]", "   dt [yr]", "       Temp [K]", "           Mean M Wgt",
+          "       Tot dens [cm^-3]", "     HI dens [cm^-3]", "     HII dens [cm^-3]", "   HeI dens [cm^-3]",
+          "   HeII dens [cm^-3]", "  HeIII dens [cm^-3]", "  e- dens [cm^-3]",
+          "    IntrnEnerg [erg/g=cm^2/s^2]");
 }
 
 /**
@@ -437,19 +437,19 @@ void write_timestep(FILE *fd, grackle_field_data *grackle_fields,
   }
 
   fprintf(fd,
-          "%9d %15.3e %15.3e %15.3e %15.3e %15.3e %15.3e %15.3e %15.3e %15.3e "
-          "%15.3e "
-          "%15.3e %15.3e\n",
+          "%9d %15.5e %15.3e %20.10e %20.10e %20.10e %20.10e %20.10e %20.10e %20.10e " // Show more decimal places, for higher numerical precision
+          "%20.10e "
+          "%20.10e %20.10e\n",
           step, t / const_yr * time_units, dt / const_yr * time_units,
           temperature[field_index], mu[field_index],
-          grackle_fields->density[field_index]*density_units/const_mh,
-          grackle_fields->HI_density[field_index]*density_units/const_mh,
-          grackle_fields->HII_density[field_index]*density_units/const_mh,
-          grackle_fields->HeI_density[field_index]*density_units/const_mh,
-          grackle_fields->HeII_density[field_index]*density_units/const_mh,
-          grackle_fields->HeIII_density[field_index]*density_units/const_mh,
-          grackle_fields->e_density[field_index]*density_units/const_mh,
-          grackle_fields->internal_energy[field_index]*velocity_units*velocity_units);
+          grackle_fields->density[field_index] * grackle_units_data->density_units / const_mh,
+          grackle_fields->HI_density[field_index] * grackle_units_data->density_units / const_mh,
+          grackle_fields->HII_density[field_index] * grackle_units_data->density_units / const_mh,
+          grackle_fields->HeI_density[field_index] * grackle_units_data->density_units / const_mh,
+          grackle_fields->HeII_density[field_index] * grackle_units_data->density_units / const_mh,
+          grackle_fields->HeIII_density[field_index] * grackle_units_data->density_units / const_mh,
+          grackle_fields->e_density[field_index] * grackle_units_data->density_units / const_mh,
+          grackle_fields->internal_energy[field_index] * grackle_units_data->velocity_units * grackle_units_data->velocity_units);
 }
 
 

@@ -12,11 +12,11 @@ print(f"Using device: {device}")
 
 MODEL_NAME = "PINN.pth"
 BEST_NAME = "PINN_BEST.pth"
-DATA_PATH = "Grackle_GTs/"    # Path where output_*.dat are located
+DATA_PATH = "Grackle_100yr/"    # Path where the output_*.dat are located
 
 BATCH_SIZE = 8192 # 16384
 LEARNING_RATE = 1.0e-4
-EPOCHS = 250
+EPOCHS = 100
 LAMBDA_PHYS = 1.0
 
 # Data Loading
@@ -29,10 +29,10 @@ dataloader = DataLoader(
     pin_memory=True
 )
 torch.save({
-    'x_min': dataset.x_min,
-    'x_max': dataset.x_max,
-    'y_min': dataset.y_min,
-    'y_max': dataset.y_max
+    'in_mean': dataset.in_mean,
+    'in_std': dataset.in_std,
+    'tg_mean': dataset.tg_mean,
+    'tg_std': dataset.tg_std
 }, f"scaling_params_{MODEL_NAME}")
 print(f"Scaling parameters saved to scaling_params_{MODEL_NAME}")
 
@@ -42,10 +42,10 @@ grackle_phys = GrackleRates()
 phys_manager = PhysicsLossManager(
     model, 
     grackle_phys, 
-    x_min=dataset.x_min.to(device), 
-    x_max=dataset.x_max.to(device),
-    y_min=dataset.y_min.to(device),
-    y_max=dataset.y_max.to(device)
+    in_mean=dataset.in_mean.to(device), 
+    in_std=dataset.in_std.to(device),
+    tg_mean=dataset.tg_mean.to(device),
+    tg_std=dataset.tg_std.to(device)
 )
 optimiser = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE) # DEBUG: Try Ethan's suggestion!
 criterion = nn.MSELoss()

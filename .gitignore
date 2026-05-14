@@ -15,11 +15,13 @@ EnvPablo/
 *.job
 *.png
 *.pth
+*.txt
 
 # --- C/C++ Compiled Files ---
 # Ignore the binaries you compile with gcc
 *.o
 *.so
+cooling-full-integration-100yr
 
 # --- Project Specifics ---
 .vscode/

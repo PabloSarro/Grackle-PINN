@@ -7,8 +7,8 @@ class PINN(nn.Module):
         Optimised PINN to solve coupled ODEs.
         
         Args:
-            input_dim (int): Dimension of the input tensor. Set to 4: [t, T0, HI0, HII0] 
-            output_dim (int): Dimension of the output tensor. Set to 3: [T, HI, HII]
+            input_dim (int): Dimension of the input tensor. Set to 4: [dt, log(T(t)), log(nHI(t)), log(nHII(t))] 
+            output_dim (int): Dimension of the output tensor. Set to 3: [log(y(t+dt)/y(t))], for y = T, nHI, nHII.
             hidden_dim (int): Number of neurons in each hidden layer.
             hidden_layers (int): Number of hidden layers in the network.
         """
@@ -29,16 +29,15 @@ class PINN(nn.Module):
                 nn.init.zeros_(m.bias)
 
     def forward(self, x):
-        # To enforce the initial conditions, we format the PINN as follows:
-        #   y(t) = y0 + t·PINN(t,y), 
-        # where y0 is the initial condition and PINN(t,y) is the output of the network.
-        y0 = x[:, 1:]
-        t = x[:, 0:1]
-        PINN = self.net(x)
-        # print("y0=",y0)
-        # print("t=",t)
-        # print("PINN=",PINN)
-        return y0 + t*PINN
+        # # We format the PINN as follows:
+        # #       y(t+dt) = y + dt·PINN(dt,y), 
+        # # where y is the condition at time t and PINN(dt,y) is the output of the network.
+
+        # dt = x[:, 0:1]
+        # y = x[:, 1:] # [T, nHI, nHII]
+        # PINN = self.net(x)
+        # return y + dt*PINN
+        return self.net(x)
 
 # ---------------------------------------------------------
 # Testing block

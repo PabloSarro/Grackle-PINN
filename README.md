@@ -2,19 +2,30 @@
 
 This project implements a **Physics-Informed Neural Network (PINN)** to emulate the Grackle chemistry and cooling library. The model solves stiff coupled ODEs for Temperature ($T$), Neutral Hydrogen ($HI$), and Ionized Hydrogen ($HII$).
 
-### 1. Data Generation (Pre-requisite)
-Before training the neural network, you must generate the Ground Truth (GT) dataset using the Grackle library (typically via its C++ or Python interface).
 
-* **Generate Simulations:** Run your Grackle simulation script to produce the `output_*.dat` files. 
-* **Organization:** Ensure all generated files are moved to the `Grackle_GTs/` directory.
-* **Format:** Each `.dat` file should follow the standard Grackle columnar output (Time, Temperature, and species mass fractions).
-
-### 2. Environment Setup
-Ensure you have the required dependencies installed on the EPFL Izar cluster or your local machine:
+### 1. Initial Setup
 
 ```bash
 pip install -r requirements.txt
+mkdir -p logs GrackleData
 ```
+
+
+### 2. Data Generation (Pre-requisite)
+Before training the neural network, you must generate the Ground Truth (GT) dataset using the Grackle library. To do so:
+
+**2.1. Create Initial Conditions:**
+Run:
+```bash
+python params.py
+```
+
+**2.2. Generate Ground Truth Simulations for all ICs:**
+Run:
+```bash
+sbatch generate_data.sh
+```
+
 
 ### 3. Model Training
 Training is designed to run on a GPU-enabled cluster using SLURM. 

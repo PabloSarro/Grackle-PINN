@@ -10,7 +10,6 @@ class GrackleRates:
         self.units = units
         self.tiny = tiny
         self.k_B = 1.380649e-16       # Boltzmann constant [erg/K]
-        self.eV_to_erg = 1.60218e-12  # Energy conversion
 
     def compute_chemical_rates(self, T):
         """
@@ -109,28 +108,25 @@ class GrackleRates:
 
         # ciHI(i)*HI(i,j,k)*de(i,j,k)
         ciHI_rate = 2.18e-11 * rates['k1']
-        lambda_ci = rates['k1'] * nHI * ne * (13.6 * self.eV_to_erg) # 13.6 eV is the ionization potential of Hydrogen
-        # Should be the same as: lambda_ci = ciHI_rate * nHI * ne
+        lambda_ci = ciHI_rate * nHI * ne
+        # Previously: rates['k1'] * nHI * ne * (13.6 * self.eV_to_erg) # 13.6 eV is the ionization potential of Hydrogen (self.eV_to_erg = 1.60218e-12  # Energy conversion, defined in __init__)
 
-        # // ----- 3. Recombination Cooling (Case B) ----- \\ DEBUG!!
+        # // ----- 3. Recombination Cooling (Case B) ----- \\
         # Can be found in line 832 of grackle/src/clib/rate_functions.c
 
         # reHII(i)*HII(i,j,k)*de(i,j,k)
-        reHII_rate = 3.48e-26 * torch.sqrt(T) * torch.pow(T/1e3, -0.2) / (1.0 + torch.pow(T/1e6, 0.7))
+        lambdaHI = 2.0 * 157807.0 / T
+        reHII_rate = 3.435e-30 * T * torch.pow(lambdaHI, 1.970) / torch.pow( 1.0 + torch.pow(lambdaHI/2.25, 0.376), 3.720)
         lambda_re = reHII_rate * nHII * ne
-        # Or should this be:
-        # lambdaHI = 2.0 * 157807.0 / T;
-        # lambda_re = 3.435e-30 * T * pow(lambdaHI, 1.970) / pow( 1.0 + pow(lambdaHI/2.25, 0.376), 3.720)
-        # ?
+        # Previously: reHII_rate = 3.48e-26 * torch.sqrt(T) * torch.pow(T/1e3, -0.2) / (1.0 + torch.pow(T/1e6, 0.7))
 
         # // ----- 4. Bremsstrahlung (Free-Free) ----- \\
         # Can be found in line 910 of grackle/src/clib/rate_functions.c
 
         # brem(i)*HII(i,j,k)*de(i,j,k)
-        lambda_br = 1.42e-27 * 1.3 * torch.sqrt(T) * nHII * ne
-        # Or should this be
-        # lambda_br = 1.43e-27 * sqrt(T) * (1.1 + 0.34 * exp( -pow(5.5 - log10(T), 2) / 3.0)) * nHII * ne
-        # ?
+        brem_rate = 1.43e-27 * torch.sqrt(T) * (1.1 + 0.34 * torch.exp(-torch.pow(5.5 - torch.log10(T), 2) / 3.0))
+        lambda_br = brem_rate * nHII * ne
+        # Previously: lambda_br = 1.42e-27 * 1.3 * torch.sqrt(T) * nHII * ne
         
         return lambda_ce + lambda_ci + lambda_re + lambda_br
     

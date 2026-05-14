@@ -1,5 +1,4 @@
 import numpy as np
-import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
@@ -12,8 +11,8 @@ class GrackleDataset(Dataset):
     def __init__(self, folder_path, pattern="output_*.dat"):
         """
         Load multiple Grackle simulations (will be our inputs).
-        PINN's input  (x): [t, log10(T0), log10(HI0), log10(HII0)] (normalised between 0 and 1)
-        PINN's output (y): [log10(T), log10(HI), log10(HII)] (normalised between 0 and 1)
+        PINN's input  (x): [dt, log(y(t))] (and standardised), for y = T, nHI, nHII
+        PINN's output (y): [log(y(t+dt)/y(t))] (and standardised), for y = T, nHI, nHII
         """
         self.all_inputs = []
         self.all_targets = []
@@ -36,89 +35,58 @@ class GrackleDataset(Dataset):
             
             # Extract the data
             data = pd.read_csv(f, comment='#', sep='\s+', header=None)
+
+            # // ---- Inputs [dt, log(T(t)), log(nHI(t)), log(nHII(t))] for every timestep ---- \\
+            # // ---- Targets [log(T(t+dt)/T(t)), log(nHI(t+dt)/nHI(t)), log(nHII(t+dt)/nHII(t))] for every timestep ---- \\
             
             # Extract its state vectors, and convert to physical units
-            t = data.iloc[:, 1].values.astype(np.float32) # * SEC_PER_YEAR
-            T = data.iloc[:, 3].values.astype(np.float32)
-            nHI   = data.iloc[:, 6].values.astype(np.float32) * density_units / m_H
-            nHII  = data.iloc[:, 7].values.astype(np.float32) * density_units / m_H
+            dt = data.iloc[1:, 2].values.astype(np.float64) # Vector of dt's (ignoring the initial dt)
+            T = data.iloc[:, 3].values.astype(np.float64)
+            nHI = data.iloc[:, 6].values.astype(np.float64) * density_units / m_H
+            nHII = data.iloc[:, 7].values.astype(np.float64) * density_units / m_H
+                        
+            T_curr = T[:-1]            # T(t), for all t (except last one)
+            T_next = T[1:]             # T(t+dt), for all t (besides first)
+            T_targ = np.log(T_next)-np.log(T_curr)     # log(T(t+dt)/T(t))
+            
+            nHI_curr = nHI[:-1]        # nHI(t)
+            nHI_next = nHI[1:]         # nHI(t+dt)
+            nHI_targ = np.log(nHI_next)-np.log(nHI_curr)  # log(nHI(t+dt)/nHI(t))
+            
+            nHII_curr = nHII[:-1]      # nHII(t)
+            nHII_next = nHII[1:]       # nHII(t+dt)
+            nHII_targ = np.log(nHII_next)-np.log(nHII_curr)  # log(nHII(t+dt)/nHII(t))
 
-            # Extract the Initial Conditions (first row of the file)
-            T0, nHI0, nHII0 = T[0], nHI[0], nHII[0]
+            # Stack into (N, 4) and (N, 3), respectively.
+            inputs = np.stack([dt, np.log(T_curr), np.log(nHI_curr), np.log(nHII_curr)], axis=1)
+            targets = np.stack([T_targ, nHI_targ, nHII_targ], axis=1)
 
-            # Logarithmic Normalisation (with safety floor to avoid log(0))
-
-            # // ---- Inputs [t, T0, HI0, HII0] for every timestep t ---- \\
-            # Log of the ICs.
-            val_T0 = np.log10(np.maximum(T0, 1e-20))
-            val_nHI0 = np.log10(np.maximum(nHI0, 1e-20))
-            val_nHII0 = np.log10(np.maximum(nHII0, 1e-20))
-
-            # Turn the ICs into possible inputs of the PINN --> arrays of size #timesteps
-            t_lin = t.astype(np.float32)
-            log_T0 = np.full_like(t_lin, val_T0)
-            log_nHI0 = np.full_like(t_lin, val_nHI0)
-            log_nHII0 = np.full_like(t_lin, val_nHII0)
-
-            # Stack into (N, 4)
-            file_inputs = np.stack([t_lin, log_T0, log_nHI0, log_nHII0], axis=1)
-            # [t0, log_T0, log_HI0, log_HII0] (input at time t0), 
-            # [t1, log_T0, log_HI0, log_HII0] (input at time t1), 
-            # [t2, log_T0, log_HI0, log_HII0] (input at time t2), ...
-
-            # // ---- Targets [T, nHI, nHII] for every timestep t ---- \\
-            log_T = np.log10(np.maximum(T, 1e-20))
-            log_nHI = np.log10(np.maximum(nHI, 1e-20))
-            log_nHII = np.log10(np.maximum(nHII, 1e-20))
-
-            # Stack into (N, 3)
-            file_targets = np.stack([log_T, log_nHI, log_nHII], axis=1)
-            # [log_T0, log_HI0, log_HII0] (output at time t0), 
-            # [log_T1, log_HI1, log_HII1] (output at time t1), 
-            # [log_T2, log_HI2, log_HII2] (output at time t2), ...
-
-            # maybe no need to include outputs at t0, since they are the same as the ICs #
-
-            self.all_inputs.append(file_inputs)
-            self.all_targets.append(file_targets)
+            self.all_inputs.append(inputs)
+            self.all_targets.append(targets)
 
         self.all_inputs = torch.from_numpy(np.concatenate(self.all_inputs, axis=0)).float()
         self.all_targets = torch.from_numpy(np.concatenate(self.all_targets, axis=0)).float()
-        
-        print("\n--- TIME DEBUG: BEFORE NORM ---")
-        raw_time = self.all_inputs[:, 0]
-        print(f"Global Raw log_t Min: {raw_time.min().item():.4f}")
-        print(f"Global Raw log_t Max: {raw_time.max().item():.4f}")
-        print(f"First 10 raw log_t values:\n{raw_time[:10].numpy()}")
 
-        print("Pre-normalising inputs and targets...")
-        self.x_min = self.all_inputs.min(axis=0)[0]
-        self.x_max = self.all_inputs.max(axis=0)[0]
-        self.y_min = self.all_targets.min(axis=0)[0]
-        self.y_max = self.all_targets.max(axis=0)[0]
+        print("Pre-normalising inputs and targets...")        
+        # No need to normalise time.
+        #   self.dt_min = dt.min()
+        #   self.dt_max = dt.max()
+        self.in_mean = self.all_inputs.mean(dim=0)
+        self.in_std = self.all_inputs.std(dim=0)
 
-        # Note that inputs contain [t, log_T0, log_HI0, log_HII0], and outputs [log_T, log_HI, log_HII].
-        # Force the inputs at indices 1, 2, 3 to use the same scale as the targets (same physical quantities)
-        # In this way, the PINN learns to predict values that are on the same scale as the targets.
-        self.x_min[1:] = self.y_min
-        self.x_max[1:] = self.y_max
+        self.tg_mean = self.all_targets.mean(dim=0)
+        self.tg_std = self.all_targets.std(dim=0)
 
-        print("\n--- SCALING DEBUG ---")
-        print(f"x_min: {self.x_min.numpy()}")
-        print(f"x_max: {self.x_max.numpy()}")
-        print(f"y_min: {self.y_min.numpy()}")
-        print(f"y_max: {self.y_max.numpy()}")
-        print("--- END SCALING DEBUG ---\n")
+        print("\n--- SCALING (MINS/MAXS) ---")
+        print("inputs_mean:", self.in_mean)
+        print("inputs_std:", self.in_std)
+        print("targets_mean:", self.tg_mean)
+        print("targets_std:", self.tg_std)
+        print("--- END SCALING ---\n")
 
-        self.all_inputs = (self.all_inputs - self.x_min) / (self.x_max - self.x_min + 1e-8)
-        self.all_targets = (self.all_targets - self.y_min) / (self.y_max - self.y_min + 1e-8)
+        self.all_inputs = (self.all_inputs - self.in_mean) / (self.in_std + 1e-8)
+        self.all_targets = (self.all_targets - self.tg_mean) / (self.tg_std + 1e-8)
 
-        print("\n--- TIME DEBUG: AFTER NORM ---")
-        norm_time = self.all_inputs[:, 0]
-        print(f"Global Norm log_t Min: {norm_time.min().item():.4f}")
-        print(f"Global Norm log_t Max: {norm_time.max().item():.4f}")
-        print(f"First 10 norm log_t values:\n{norm_time[:10].numpy()}\n")
-        
         print("Dataset ready.")
 
 

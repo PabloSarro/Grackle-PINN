@@ -30,14 +30,8 @@ for MODEL_NAME in MODEL_NAMES:
     model.eval()
 
     for VALID_FILE, PLOT_NAME in zip(VALID_FILES, PLOT_NAMES):
-        with open(VALID_FILE, 'r') as header_file:
-            head = [header_file.readline() for _ in range(3)]
-
-        mass_units = float(head[1].split(':')[1].split('[')[0])
-        length_units = float(head[2].split(':')[1].split('[')[0])
-        density_units = mass_units / (length_units**3)
-
-        # 2. Load and Process the validation file
+        
+        # 1. Load and Process the validation file
         df = pd.read_csv(VALID_FILE, comment='#', sep='\s+', header=None)
 
         # 2. Extract Ground Truth (Ignoring Row 0 as decided)
@@ -45,8 +39,8 @@ for MODEL_NAME in MODEL_NAMES:
         t_yr = df.iloc[1:, 1].values
         dt_yr = df.iloc[1:, 2].values
         T_gt = df.iloc[1:, 3].values
-        HI_gt = df.iloc[1:, 6].values * density_units / m_H
-        HII_gt = df.iloc[1:, 7].values * density_units / m_H
+        HI_gt = df.iloc[1:, 6].values
+        HII_gt = df.iloc[1:, 7].values
 
         # 3. Iterative PINN Prediction
         # Initialize predictions with the first valid GT point

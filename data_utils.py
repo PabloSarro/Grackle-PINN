@@ -24,14 +24,6 @@ class GrackleDataset(Dataset):
 
         # For each file
         for f in files:
-            # Extract the units used
-            with open(f, 'r') as header_file:
-                # Read only the first 4 lines
-                head = [header_file.readline() for _ in range(3)]
-            
-            mass_units = float(head[1].split(':')[1].split('[')[0]) # should be 1.98841e43
-            length_units = float(head[2].split(':')[1].split('[')[0]) # should be 3.08567758e24
-            density_units = mass_units / (length_units**3)
             
             # Extract the data
             data = pd.read_csv(f, comment='#', sep='\s+', header=None)
@@ -42,8 +34,8 @@ class GrackleDataset(Dataset):
             # Extract its state vectors, and convert to physical units
             dt = data.iloc[1:, 2].values.astype(np.float64) # Vector of dt's (ignoring the initial dt)
             T = data.iloc[:, 3].values.astype(np.float64)
-            nHI = data.iloc[:, 6].values.astype(np.float64) * density_units / m_H
-            nHII = data.iloc[:, 7].values.astype(np.float64) * density_units / m_H
+            nHI = data.iloc[:, 6].values.astype(np.float64)
+            nHII = data.iloc[:, 7].values.astype(np.float64)
                         
             T_curr = T[:-1]            # T(t), for all t (except last one)
             T_next = T[1:]             # T(t+dt), for all t (besides first)

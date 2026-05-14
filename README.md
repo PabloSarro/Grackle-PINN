@@ -58,6 +58,3 @@ python visualise.py
 *This will generate `pinn_performance.png`, showcasing the model’s ability to capture non-linear chemical and thermal dynamics.*
 
 ---
-
-### 💡 A Quick Note for the README
-> **Important:** The model utilizes a **Dynamic Time Floor** in `data_utils.py`. The initial condition ($t=0$) is mapped to $t_1/10$ to prevent the "spectral bias" squash in log-space while maintaining the mathematical integrity of the $y = y_0 + t \cdot NN$ anchor.

@@ -7,7 +7,7 @@ class PINN(nn.Module):
         Optimised PINN to solve coupled ODEs.
         
         Args:
-            input_dim (int): Dimension of the input tensor. Set to 4: [dt, log(T(t)), log(nHI(t)), log(nHII(t))] 
+            input_dim (int): Dimension of the input tensor. Set to 4: [dt, log(y(t))], for y = T, nHI, nHII. 
             output_dim (int): Dimension of the output tensor. Set to 3: [log(y(t+dt)/y(t))], for y = T, nHI, nHII.
             hidden_dim (int): Number of neurons in each hidden layer.
             hidden_layers (int): Number of hidden layers in the network.

@@ -1,22 +1,37 @@
 import torch
 import torch.nn as nn
+import argparse
+from model import PINN
 from torch.utils.data import DataLoader
 from data_utils import GrackleDataset
-from model import PINN
 from physics import GrackleRates, PhysicsLossManager
 import time
+
+# --- ARGUMENT PARSER ---
+parser = argparse.ArgumentParser(description="Train Grackle PINN")
+parser.add_argument('--precision', type=str, default='float32', choices=['float32', 'float64'], 
+                    help='Set training precision')
+args = parser.parse_args()
+
+# --- GLOBAL PRECISION SETUP ---
+if args.precision == 'float64':
+    torch.set_default_dtype(torch.float64)
+else:
+    torch.set_default_dtype(torch.float32)
 
 # Initial Configuration and Hyperparameters
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
+print(f"Training Precision: {torch.get_default_dtype()}")
 
-MODEL_NAME = "PINN.pth"
-BEST_NAME = "PINN_BEST.pth"
-DATA_PATH = "Grackle_100yr/"    # Path where the output_*.dat are located
+MODEL_NAME = f"PINN_{args.precision}.pth"
+BEST_NAME = f"PINN_BEST_{args.precision}.pth"
+SCALING_NAME = f"scaling_params_PINN_{args.precision}.pth"
+DATA_PATH = "Grackle_100yr_3/" # Path where the output_*.dat are located
 
-BATCH_SIZE = 8192 # 16384
+BATCH_SIZE = 16384 # 8192
 LEARNING_RATE = 1.0e-4
-EPOCHS = 100
+EPOCHS = 50
 LAMBDA_PHYS = 1.0
 
 # Data Loading
@@ -33,8 +48,8 @@ torch.save({
     'in_std': dataset.in_std,
     'tg_mean': dataset.tg_mean,
     'tg_std': dataset.tg_std
-}, f"scaling_params_{MODEL_NAME}")
-print(f"Scaling parameters saved to scaling_params_{MODEL_NAME}")
+}, SCALING_NAME)
+print(f"Scaling parameters saved to {SCALING_NAME}")
 
 # Model, Optimiser, and Loss
 model = PINN(input_dim=4, output_dim=3, hidden_dim=128, hidden_layers=8).to(device)

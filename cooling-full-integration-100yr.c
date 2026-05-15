@@ -400,10 +400,10 @@ void write_header(FILE *fd) {
 
   fprintf(fd,
           "#%8s %15s %15s %15s %15s %15s %15s %15s %15s %15s %15s %15s %15s\n",
-          "step", "Time [yr]", "   dt [yr]", "       Temp [K]", "           Mean M Wgt",
-          "       Tot dens [cm^-3]", "     HI dens [cm^-3]", "     HII dens [cm^-3]", "   HeI dens [cm^-3]",
-          "   HeII dens [cm^-3]", "  HeIII dens [cm^-3]", "  e- dens [cm^-3]",
-          "    IntrnEnerg [erg/g=cm^2/s^2]");
+          "step", "Time [yr]", "       dt [yr]    ", "   Temperature [K]    ", "       Mean Mol Wgt      ",
+          "      Tot dens [cm^-3]      ", "    HI dens [cm^-3]     ", "     HII dens [cm^-3]    ", "    HeI dens [cm^-3]    ",
+          "     HeII dens [cm^-3]    ", "   HeIII dens [cm^-3]     ", "    e- dens [cm^-3]    ",
+          "IntrnEnerg [erg/g=cm^2/s^2]");
 }
 
 /**
@@ -436,10 +436,9 @@ void write_timestep(FILE *fd, grackle_field_data *grackle_fields,
     abort();
   }
 
-  fprintf(fd,
-          "%9d %15.5e %15.3e %20.10e %20.10e %20.10e %20.10e %20.10e %20.10e %20.10e " // Show more decimal places, for higher numerical precision
-          "%20.10e "
-          "%20.10e %20.10e\n",
+  fprintf(fd,  
+          // Show more decimal places, for higher numerical precision
+          "%9d %15.5e %15.3e %25.16e %25.16e %25.16e %25.16e %25.16e %25.16e %25.16e %25.16e %25.16e %25.16e\n",
           step, t / const_yr * time_units, dt / const_yr * time_units,
           temperature[field_index], mu[field_index],
           grackle_fields->density[field_index] * grackle_units_data->density_units / const_mh,

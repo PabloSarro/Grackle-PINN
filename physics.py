@@ -19,7 +19,6 @@ class GrackleRates:
         T_ev = T / 11605.0          # Convert from K to eV
         logT_ev = torch.log(T_ev)
 
-
         # k1: HI + e -> HII + 2e (Collisional Ionization)
         # Can be found in line 35 of grackle/src/clib/rate_functions.c
         k1 = torch.exp(-32.71396786375 
@@ -38,74 +37,19 @@ class GrackleRates:
         k2 = (4.881357e-6 * torch.pow(T, -1.5) * torch.pow((1.0 + 1.14813e2 * torch.pow(T, -0.407)), -2.242))
         k2 = torch.where(T < 1.0e9, k2, torch.full_like(T, self.tiny))
 
-        # // ----- NOT CONSIDERED FOR NOW, SINCE HELIUM IS SET TO 0 ----- \\
-        # # k3: HeI + e -> HeII + 2e
-        # k3 = torch.exp(-44.09864886561001 
-        #                    + 23.91596563469 * logT_ev 
-        #                    - 10.75323019821 * torch.pow(logT_ev, 2)
-        #                    + 3.058038757198 * torch.pow(logT_ev, 3) 
-        #                    - 0.5685118909884001 * torch.pow(logT_ev, 4)
-        #                    + 0.06795391233790001 * torch.pow(logT_ev, 5) 
-        #                    - 0.005009056101857001 * torch.pow(logT_ev, 6)
-        #                    + 0.0002067236157507 * torch.pow(logT_ev, 7) 
-        #                    - 3.649161410833e-6 * torch.pow(logT_ev, 8))
-        # rates['k3'] = torch.where(T_ev > 0.8, k3, torch.full_like(T, self.tiny))
-
-        # // ----- NOT CONSIDERED FOR NOW, SINCE HELIUM IS SET TO 0 ----- \\
-        # # k4: HeII + e -> HeI + photon (Case B Recombination)
-        # k4 = (1.26e-14 * torch.pow(5.7067e5 / T, 0.75))
-        # rates['k4'] = k4
-
-        # // ----- NOT CONSIDERED FOR NOW, SINCE HELIUM IS SET TO 0 ----- \\
-        # # k5: HeII + e -> HeIII + 2e
-        # k5 = torch.exp(-68.71040990212001 
-        #                    + 43.93347632635 * logT_ev 
-        #                    - 18.48066993568 * torch.pow(logT_ev, 2)
-        #                    + 4.701626486759002 * torch.pow(logT_ev, 3) 
-        #                    - 0.7692466334492 * torch.pow(logT_ev, 4)
-        #                    + 0.08113042097303 * torch.pow(logT_ev, 5) 
-        #                    - 0.005324020628287001 * torch.pow(logT_ev, 6)
-        #                    + 0.0001975705312221 * torch.pow(logT_ev, 7) 
-        #                    - 3.165581065665e-6 * torch.pow(logT_ev, 8))
-        # rates['k5'] = torch.where(T_ev > 0.8, k5, torch.full_like(T, self.tiny))
-
-        # // ----- NOT CONSIDERED FOR NOW, SINCE HELIUM IS SET TO 0 ----- \\
-        # # k6: HeIII + e -> HeII + photon (Case B Recombination)
-        # k6 = (7.8155e-5 * torch.pow(T, -1.5) * torch.pow((1.0 + 2.0189e2 * torch.pow(T, -0.407)), -2.242))
-        # rates['k6'] = torch.where(T < 1.0e9, k6, torch.full_like(T, self.tiny))
-
-        # // ----- NOT CONSIDERED FOR NOW, SINCE IT HAPPENS TO ADD NOISE TO THE PHYSICS LOSS! ----- \\
-        # k7 (k57 in source): HI + HI -> HII + HI + e
-        # Can be found in line 678 of grackle/src/clib/rate_functions.c
-        # k7 = 1.2e-17 * torch.pow(T, 1.2) * torch.exp(-157800.0 / T)
-        # rates['k7'] = torch.where(T > 3000.0, k7, torch.full_like(T, self.tiny))
-
-        # // ----- NOT CONSIDERED FOR NOW, SINCE HELIUM IS SET TO 0 ----- \\
-        # # k8 (k58 in source): HI + HeI -> HII + HeI + e
-        # # Based on Lenzuni et al. (1991) heavy particle fit
-        # k8 = 1.75e-17 * torch.pow(T, 1.3) * torch.exp(-157800.0 / T)
-        # rates['k8'] = torch.where(T > 1.0e4, k8, torch.full_like(T, self.tiny))
-
-        # // ----- NOT CONSIDERED FOR NOW, SINCE RT_HI_ionization_rate IS SET TO 0 ----- \\
-        # k9: HI + photon -> HII + e
-        # ...
-
         return k1, k2
 
+    
     def compute_cooling_rates(self, T, nHI, nHII, ne):
         """Calculates the 4 primary cooling processes in [erg s^-1 cm^-3]."""
         
         # // ----- 1. Collisional Excitation (Line Emission) - Cen (1992) fit ----- \\
         # Can be found in line 755 of grackle/src/clib/rate_functions.c
- 
-        # ceHI(i)*HI(i,j,k)*de(i,j,k)
         ceHI_rate = 7.5e-19 * torch.exp(-118348.0 / T) / (1.0 + torch.sqrt(T/1.0e5))
         lambda_ce = ceHI_rate * nHI * ne
 
         # // ----- 2. Collisional Ionization (Energy lost per k1 event) ------ \\
         # Can be found in line 799 of grackle/src/clib/rate_functions.c
-
-        # ciHI(i)*HI(i,j,k)*de(i,j,k)
         T = torch.clamp(T, min=1.0)
         T_ev = T / 11605.0
         logT_ev = torch.log(T_ev)
@@ -122,24 +66,17 @@ class GrackleRates:
         k1 = torch.where(T_ev > 0.8, k1, torch.clamp(k1, min=self.tiny))
         ciHI_rate = 2.18e-11 * k1
         lambda_ci = ciHI_rate * nHI * ne
-        # Previously: rates['k1'] * nHI * ne * (13.6 * self.eV_to_erg) # 13.6 eV is the ionization potential of Hydrogen (self.eV_to_erg = 1.60218e-12  # Energy conversion, defined in __init__)
 
         # // ----- 3. Recombination Cooling (Case B) ----- \\
         # Can be found in line 832 of grackle/src/clib/rate_functions.c
-
-        # reHII(i)*HII(i,j,k)*de(i,j,k)
         lambdaHI = 2.0 * 157807.0 / T
         reHII_rate = 3.435e-30 * T * torch.pow(lambdaHI, 1.970) / torch.pow(1.0 + torch.pow(lambdaHI/2.25, 0.376), 3.720)
         lambda_re = reHII_rate * nHII * ne
-        # Previously: reHII_rate = 3.48e-26 * torch.sqrt(T) * torch.pow(T/1e3, -0.2) / (1.0 + torch.pow(T/1e6, 0.7))
 
         # // ----- 4. Bremsstrahlung (Free-Free) ----- \\
         # Can be found in line 910 of grackle/src/clib/rate_functions.c
-
-        # brem(i)*HII(i,j,k)*de(i,j,k)
         brem_rate = 1.43e-27 * torch.sqrt(T) * (1.1 + 0.34 * torch.exp(-torch.pow(5.5 - torch.log10(T), 2) / 3.0))
         lambda_br = brem_rate * nHII * ne
-        # Previously: lambda_br = 1.42e-27 * 1.3 * torch.sqrt(T) * nHII * ne
         
         return lambda_ce + lambda_ci + lambda_re + lambda_br
     
@@ -156,7 +93,7 @@ class PhysicsLossManager:
         self.tg_mean = tg_mean
         self.tg_std = tg_std
 
-    def get_residuals(self, batch_x, preds):
+    def get_residuals(self, batch_x, preds, print_samples=False):
         """
         Computes the residuals for all species.
             
@@ -188,7 +125,6 @@ class PhysicsLossManager:
         log_T_ratio = torch.clamp(output_destand[:, 0:1], min=-10.0, max=10.0)
         log_nHI_ratio = torch.clamp(output_destand[:, 1:2], min=-15.0, max=15.0)
         log_nHII_ratio = torch.clamp(output_destand[:, 2:3], min=-15.0, max=15.0)
-
 
         T = torch.exp(log_T_t)
         nHI = torch.exp(log_nHI_t)
@@ -262,13 +198,10 @@ class PhysicsLossManager:
         DEBUG_helper("k2_next", k2)
         # k7 = rates['k7']
 
-        # 2.2.2. Compute the gain and loss terms.
-        # Term contributing to the production of HII (and loss of HI)
-        ionisation = k1*nHI_next*ne_next # implicit
+        # 2.2.2. Compute the gain and loss terms (both with an implicit formulation).
+        ionisation = k1*nHI_next*ne_next
+        recombination = k2*nHII_next*ne_next
         DEBUG_helper("ionisation", ionisation)
-        
-        # Term contributing to the production of HI (and loss of HII)
-        recombination = k2*nHII_next*ne_next # implicit
         DEBUG_helper("recombination", recombination)
 
         # 2.2.3. Compute dnHI/dt, dnHII/dt
@@ -277,6 +210,7 @@ class PhysicsLossManager:
         DEBUG_helper("nHI_react", nHI_react)
         DEBUG_helper("nHII_react", nHII_react)
 
+
         # // ----- 3. Physical Loss Computation --> log-MSE = (log(LHS)-log(RHS))^2 ----- \\
         # Alternative: USE NORMALISED LOSS
         eps = 1e-35
@@ -284,7 +218,7 @@ class PhysicsLossManager:
         # 3.1. Temperature
         log_cool = torch.log10(torch.abs(e_cool) + eps)
         log_du_dt = torch.log10(torch.abs(du_dt) + eps)
-        log_T_mse = torch.mean((log_cool - log_du_dt)**2)
+        log_T_mse = (log_cool - log_du_dt)**2
         DEBUG_helper("log_cool", log_cool)
         DEBUG_helper("log_du_dt", log_du_dt)
         DEBUG_helper("Physics Loss (log-MSE): nT", log_T_mse)
@@ -292,7 +226,7 @@ class PhysicsLossManager:
         # 3.2. Species (nHI)
         log_dnHI_dt = torch.log10(torch.abs(dnHI_dt) + eps)
         log_nHI_react = torch.log10(torch.abs(nHI_react) + eps)
-        log_nHI_mse = torch.mean((log_dnHI_dt - log_nHI_react)**2)
+        log_nHI_mse = (log_dnHI_dt - log_nHI_react)**2
         DEBUG_helper("log_dnHI_dt", log_dnHI_dt)
         DEBUG_helper("log_nHI_react", log_nHI_react)
         DEBUG_helper("Physics Loss (log-MSE): nHI", log_nHI_mse)
@@ -300,10 +234,119 @@ class PhysicsLossManager:
         # 3.3. Species (nHII)
         log_dnHII_dt = torch.log10(torch.abs(dnHII_dt) + eps)
         log_nHII_react = torch.log10(torch.abs(nHII_react) + eps)
-        log_nHII_mse = torch.mean((log_dnHII_dt - log_nHII_react)**2)
+        log_nHII_mse = (log_dnHII_dt - log_nHII_react)**2
         DEBUG_helper("log_dnHII_dt", log_dnHII_dt)
         DEBUG_helper("log_nHII_react", log_nHII_react)
         DEBUG_helper("Physics Loss (log-MSE): nHII", log_nHII_mse)
 
+        # --- DIAGNOSTIC PRINT BLOCK ---
+        if print_samples:
+            batch_size = batch_x.shape[0]
+            print(f"\n--- Batch Physics Comparison ({batch_size} samples) ---")
+            for i in range(batch_size):
+                print(f"Sample {i+1} (T: {T[i,0]}):")
+                print(f"  Temp: LHS (e_cool)   = {e_cool[i, 0].item():12.4e} | RHS (du_dt)      = {du_dt[i, 0].item():12.4e} | log-MSE     = {log_T_mse[i, 0].item():12.4e}")
+                print(f"  nHI : LHS (dnHI_dt)  = {dnHI_dt[i, 0].item():12.4e} | RHS (nHI_react)  = {nHI_react[i, 0].item():12.4e} | log-MSE     = {log_nHI_mse[i, 0].item():12.4e}")
+                print(f"  nHII: LHS (dnHII_dt) = {dnHII_dt[i, 0].item():12.4e} | RHS (nHII_react) = {nHII_react[i, 0].item():12.4e} | log-MSE     = {log_nHII_mse[i, 0].item():12.4e}")
+            print("-" * 55)
+
         physics_loss = log_T_mse + log_nHI_mse + log_nHII_mse
-        return torch.mean(physics_loss.mean)
+        return torch.mean(physics_loss)
+
+
+# ---------------------------------------------------------
+# Ground Truth Verification Block
+# Append to the bottom of physics.py
+# ---------------------------------------------------------
+if __name__ == "__main__":
+    import pandas as pd
+    import random
+    import glob
+    import os
+    torch.set_default_dtype(torch.float64)
+
+    print("--- Verifying GrackleRates against Ground Truth Data ---")
+    
+    DATA_FOLDER = "Test_100yr/"
+    NUM_SAMPLES = 20
+
+    device = torch.device("cpu")
+
+    def compute_global_scaling(folder_path, pattern="output_*.dat"):
+        """
+        Computes global mean and std from all files in the directory.
+        """
+        files = glob.glob(os.path.join(folder_path, pattern))
+        if not files:
+            raise FileNotFoundError(f"No files found matching {pattern} in {folder_path}")
+            
+        print(f"Loading {len(files)} files...")
+        all_inputs, all_targets = [], []
+        
+        for f in files:
+            data = pd.read_csv(f, comment='#', sep='\s+', header=None)
+            
+            # Extract columns
+            dt = data.iloc[1:, 2].values.astype(np.float64)
+            T = data.iloc[:, 3].values.astype(np.float64)
+            nHI = data.iloc[:, 6].values.astype(np.float64)
+            nHII = data.iloc[:, 7].values.astype(np.float64)
+            
+            # State vectors
+            T_curr, T_next = T[:-1], T[1:]
+            nHI_curr, nHI_next = nHI[:-1], nHI[1:]
+            nHII_curr, nHII_next = nHII[:-1], nHII[1:]
+            
+            # Formulate Log-Inputs and Log-Ratios
+            inputs = np.stack([dt, np.log(T_curr), np.log(nHI_curr), np.log(nHII_curr)], axis=1)
+            targets = np.stack([
+                np.log(T_next) - np.log(T_curr),
+                np.log(nHI_next) - np.log(nHI_curr),
+                np.log(nHII_next) - np.log(nHII_curr)
+            ], axis=1)
+            
+            all_inputs.append(inputs)
+            all_targets.append(targets)
+
+        all_inputs = torch.from_numpy(np.concatenate(all_inputs, axis=0)).double()
+        all_targets = torch.from_numpy(np.concatenate(all_targets, axis=0)).double()
+
+        in_mean = all_inputs.mean(dim=0).to(device)
+        in_std = all_inputs.std(dim=0).to(device)
+        tg_mean = all_targets.mean(dim=0).to(device)
+        tg_std = all_targets.std(dim=0).to(device)
+
+        print("Dataset Loaded.")
+        
+        return all_inputs, all_targets, in_mean, in_std, tg_mean, tg_std
+
+    try:
+        all_inputs, all_targets, in_mean, in_std, tg_mean, tg_std = compute_global_scaling(DATA_FOLDER)
+
+        grackle_phys = GrackleRates()
+        phys_manager = PhysicsLossManager(
+            model=None, 
+            grackle_phys=grackle_phys, 
+            in_mean=in_mean, 
+            in_std=in_std,
+            tg_mean=tg_mean,
+            tg_std=tg_std
+        )
+
+        # 3. Standardize the entire dataset
+        inputs_scaled = (all_inputs.to(device) - in_mean) / (in_std + 1e-8)
+        targets_scaled = (all_targets.to(device) - tg_mean) / (tg_std + 1e-8)
+        
+        total_rows = len(inputs_scaled)
+        indices = sorted(random.sample(range(total_rows), min(NUM_SAMPLES, total_rows)))
+        
+        batch_x = inputs_scaled[indices]
+        batch_y = targets_scaled[indices]
+        
+        with torch.no_grad():
+            # Set print_samples=True to trigger the diagnostic block
+            loss = phys_manager.get_residuals(batch_x, batch_y, print_samples=True)
+            print(f"\n[✓] Total Log-MSE Physics Loss on Sampled Ground Truth: {loss.item():.4e}")
+
+    except Exception as e:
+        print(f"\n[!] Error during verification: {e}")

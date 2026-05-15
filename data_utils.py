@@ -56,8 +56,8 @@ class GrackleDataset(Dataset):
             self.all_inputs.append(inputs)
             self.all_targets.append(targets)
 
-        self.all_inputs = torch.from_numpy(np.concatenate(self.all_inputs, axis=0)).float()
-        self.all_targets = torch.from_numpy(np.concatenate(self.all_targets, axis=0)).float()
+        self.all_inputs = torch.from_numpy(np.concatenate(self.all_inputs, axis=0)).to(torch.get_default_dtype()) # To choose either 32 or 64-bit arithmetic.
+        self.all_targets = torch.from_numpy(np.concatenate(self.all_targets, axis=0)).to(torch.get_default_dtype())
 
         print("Pre-normalising inputs and targets...")        
         # No need to normalise time.

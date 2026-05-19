@@ -103,14 +103,14 @@ class PhysicsLossManager:
         """
         Computes the residuals for all species.
             
-            batch_x: [dt, log(y(t))], for y = T, nHI, nHII
+            batch_x: [log(y(t))], for y = T, nHI, nHII
             preds: [log(y(t+dt)/y(t))], for y = T, nHI, nHII
         """
         DEBUG_helper("get_residuals: Input batch_x", batch_x)
         DEBUG_helper("get_residuals: Input preds", preds)
 
         # =============================================================================
-        # ============= INPUT: [dt, log(T(t)), log(nHI(t)), log(nHII(t))] =============
+        # ================== INPUT: [log(y(t))] for y = T, nHI, nHII ==================
         # ============= OUTPUT: [log(y(t+dt)/T(t))], for y = T, nHI, nHII =============
         # =============================================================================
 
@@ -130,28 +130,28 @@ class PhysicsLossManager:
         output_destand = preds*(self.tg_std + 1e-8) + self.tg_mean
         
         # Linearise (remove log-space)
-        dt = input_destand[:, 0:1] * SEC_PER_YEAR
-        log_T = input_destand[:, 1:2]
-        log_nHI = input_destand[:, 2:3]
-        log_nHII = input_destand[:, 3:4]
+        # dt = 100.0 * SEC_PER_YEAR
+        # log_T = input_destand[:, 0:1]
+        log_nHI = input_destand[:, 1:2]
+        log_nHII = input_destand[:, 2:3]
 
-        log_T_ratio = torch.clamp(output_destand[:, 0:1], min=-10.0, max=10.0)
+        # log_T_ratio = output_destand[:, 0:1] # torch.clamp([...], min=-10.0, max=10.0)
         log_nHI_ratio = output_destand[:, 1:2]
         log_nHII_ratio = output_destand[:, 2:3]
 
-        T = torch.exp(log_T)
-        nHI = torch.exp(log_nHI)   # Instead of using this, for 2.1 we will use torch.logsumexp(...)
-        nHII = torch.exp(log_nHII) # Instead of using this, for 2.1 we will use torch.logsumexp(...)
+        # T = torch.exp(log_T)
+        # nHI = torch.exp(log_nHI)   # Instead of using this, for 2.1 we will use torch.logsumexp(...)
+        # nHII = torch.exp(log_nHII) # Instead of using this, for 2.1 we will use torch.logsumexp(...)
 
         # Prevent wild predictions from causing overflow in Grackle analytical fits
-        T_next = torch.clamp(T * torch.exp(log_T_ratio), min=1.0, max=1e9)
-        nHI_next = torch.clamp(nHI * torch.exp(log_nHI_ratio), min=1e-16, max=1e5)
-        nHII_next = torch.clamp(nHII * torch.exp(log_nHII_ratio), min=1e-16, max=1e5)
+        # T_next = T * torch.exp(log_T_ratio) # torch.clamp([...], min=1.0, max=1e9)
+        # nHI_next = nHI * torch.exp(log_nHI_ratio) # torch.clamp([...], min=1e-16, max=1e5)
+        # nHII_next = nHII * torch.exp(log_nHII_ratio) # torch.clamp([...], min=1e-16, max=1e5)
 
-        DEBUG_helper("T/dt:", T/dt)
-        DEBUG_helper("nHI/dt:", nHI/dt)
-        DEBUG_helper("nHII/dt:", nHII/dt)
-        DEBUG_helper("expm1:", torch.expm1(log_T_ratio))
+        # DEBUG_helper("T/dt:", T/dt)
+        # DEBUG_helper("nHI/dt:", nHI/dt)
+        # DEBUG_helper("nHII/dt:", nHII/dt)
+        # DEBUG_helper("expm1:", torch.expm1(log_T_ratio))
         
 
         # ========================================================================
@@ -242,20 +242,20 @@ class PhysicsLossManager:
         #       -e_cool = (u_{next}-u_{curr}) / dt
 
         # 2.2.1. Compute LHS.
-        ne = nHII # + nHeII + 2 * nHeIII, but these last were assumed to be 0 --> cooling box model
-        ne_next = nHII_next
-        e_cool = self.phys.compute_cooling_rates(T_next, nHI_next, nHII_next, ne_next) # Implicit formulation
+        # ne = nHII # + nHeII + 2 * nHeIII, but these last were assumed to be 0 --> cooling box model
+        # ne_next = nHII_next
+        # e_cool = self.phys.compute_cooling_rates(T_next, nHI_next, nHII_next, ne_next) # Implicit formulation
 
-        # 2.2.2. Compute RHS.
-        n_tot = nHI + nHII + ne
-        n_tot_next = nHI_next + nHII_next + ne_next
+        # # 2.2.2. Compute RHS.
+        # n_tot = nHI + nHII + ne
+        # n_tot_next = nHI_next + nHII_next + ne_next
         
-        du_dt = (3/2*self.phys.k_B)/dt * (n_tot_next*T_next - n_tot*T)
+        # du_dt = (3/2*self.phys.k_B)/dt * (n_tot_next*T_next - n_tot*T)
         
-        DEBUG_helper("T", T, min_val=0.0, max_val=1e15)
-        DEBUG_helper("e_cool", e_cool)
-        DEBUG_helper("n_tot", n_tot)
-        DEBUG_helper("du/dt", du_dt)
+        # DEBUG_helper("T", T, min_val=0.0, max_val=1e15)
+        # DEBUG_helper("e_cool", e_cool)
+        # DEBUG_helper("n_tot", n_tot)
+        # DEBUG_helper("du/dt", du_dt)
 
 
 
@@ -265,20 +265,20 @@ class PhysicsLossManager:
         # ================= (ALTERNATIVE: USE NORMALISED LOSS) =================
         # ======================================================================
         
-        def log_signed_mse(lhs, rhs, weight_sign, eps):
-            log_abs_lhs = torch.log10(torch.abs(lhs) + eps)
-            log_abs_rhs = torch.log10(torch.abs(rhs) + eps)
-            magn_loss = (log_abs_lhs - log_abs_rhs)**2
+        # def log_signed_mse(lhs, rhs, weight_sign, eps):
+        #     log_abs_lhs = torch.log10(torch.abs(lhs) + eps)
+        #     log_abs_rhs = torch.log10(torch.abs(rhs) + eps)
+        #     magn_loss = (log_abs_lhs - log_abs_rhs)**2
                 
-            # 2. Sign Penalty (0 if signs match, 'weight_sign' if opposite)
-            sign_mismatch = (torch.sign(lhs) != torch.sign(rhs)).float()
-            return magn_loss + weight_sign*sign_mismatch
+        #     # 2. Sign Penalty (0 if signs match, 'weight_sign' if opposite)
+        #     sign_mismatch = (torch.sign(lhs) != torch.sign(rhs)).float()
+        #     return magn_loss + weight_sign*sign_mismatch
         
 
         log_mass_mse = (log_nH_next_pred - log_nH_initial)**2                                   # 3.1. Species (nHI, nHII)
-        log_cool_mse = log_signed_mse(lhs=du_dt, rhs=-e_cool, weight_sign = 10.0, eps = 1e-35)  # 3.2. Temperature
+        # log_cool_mse = log_signed_mse(lhs=du_dt, rhs=-e_cool, weight_sign = 10.0, eps = 1e-35)  # 3.2. Temperature
         DEBUG_helper("Physics Loss (log-MSE): nHI, nHII", log_mass_mse)
-        DEBUG_helper("Physics Loss (log-MSE): T", log_cool_mse)
+        # DEBUG_helper("Physics Loss (log-MSE): T", log_cool_mse)
         
 
         # --- DIAGNOSTIC PRINT BLOCK ---
@@ -286,12 +286,12 @@ class PhysicsLossManager:
             batch_size = 20
             print(f"\n--- Batch Physics Comparison ({batch_size} samples) ---")
             for i in range(batch_size):
-                print(f"Sample {i+1} (T: {T[i,0].item():.2e}):")
+                # print(f"Sample {i+1} (T: {T[i,0].item():.2e}):")
                 print(f"  Mass : Initial nH   = {log_nH_initial[i, 0].item():12.4e} | Next nH = {log_nH_next_pred[i, 0].item():12.4e} | Log-Mass-MSE = {log_mass_mse[i, 0].item():12.4e}")
-                print(f"  Temp :  -e_cool     = {-e_cool[i, 0].item():12.4e} |  du_dt  = {du_dt[i, 0].item():12.4e} | Log-Cool-MSE = {log_cool_mse[i, 0].item():12.4e}")
+                # print(f"  Temp :  -e_cool     = {-e_cool[i, 0].item():12.4e} |  du_dt  = {du_dt[i, 0].item():12.4e} | Log-Cool-MSE = {log_cool_mse[i, 0].item():12.4e}")
                 print("-" * 55)
             print(f"  Mean-Log-Mass-MSE = {torch.mean(log_mass_mse):12.4e}")
-            print(f"  Mean-Log-Cool-MSE = {torch.mean(log_cool_mse):12.4e}")
+            # print(f"  Mean-Log-Cool-MSE = {torch.mean(log_cool_mse):12.4e}")
 
         # physics_loss = log_mass_mse + log_cool_mse
-        return torch.mean(log_mass_mse), torch.mean(log_cool_mse)
+        return torch.mean(log_mass_mse)#, torch.mean(log_cool_mse)

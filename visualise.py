@@ -15,17 +15,17 @@ def visualise_preds(VALID_FILE):
 
     # Prepare model container
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = PINN(input_dim=4, output_dim=3, hidden_dim=256, hidden_layers=6).to(device)
+    model = PINN(input_dim=3, output_dim=3, hidden_dim=256, hidden_layers=8).to(device)
 
     # Load Standardization parameters
-    scaling = torch.load(f"scaling_params.pth", map_location=device, weights_only=True)
-    in_mean = scaling['in_mean'].cpu().numpy() # [dt, log_T, log_HI, log_HII]
+    scaling = torch.load(f"scaling_params_noClamp_Long.pth", map_location=device, weights_only=True)
+    in_mean = scaling['in_mean'].cpu().numpy() # [log_T, log_HI, log_HII]
     in_std  = scaling['in_std'].cpu().numpy()
     tg_mean = scaling['tg_mean'].cpu().numpy() # [dlog_T, dlog_HI, dlog_HII]
     tg_std  = scaling['tg_std'].cpu().numpy()
 
     # Define the model, parameter file and validation file.
-    MODEL_NAMES = ["PINN.pth", "PINN_BEST.pth"]
+    MODEL_NAMES = ["PINN_noClamp_Long.pth", "PINN_BEST_noClamp_Long.pth"]
     for MODEL_NAME in MODEL_NAMES:
 
         if not os.path.exists(MODEL_NAME):
@@ -53,7 +53,6 @@ def visualise_preds(VALID_FILE):
 
         # 4. Compute PINN Predictions (Vectorized Teacher Forcing for Log-Increments)
         raw_in = np.stack([
-            dt_yr[:-1], 
             np.log(T_gt[:-1]), 
             np.log(HI_gt[:-1]), 
             np.log(HII_gt[:-1])
@@ -79,9 +78,6 @@ def visualise_preds(VALID_FILE):
         t_tg_mean = scaling['tg_mean'].float().to(device)
         t_tg_std = scaling['tg_std'].float().to(device)
         
-        # Pre-load all timesteps to GPU
-        dt_tensor = torch.tensor(dt_yr, dtype=torch.float32, device=device).unsqueeze(1)
-        
         # Pre-allocate the entire trajectory on the GPU in log-space
         # Shape: (num_steps, 3) representing [log(T), log(HI), log(HII)]
         trajectory_log = torch.zeros((num_steps, 3), dtype=torch.float32, device=device)
@@ -93,13 +89,11 @@ def visualise_preds(VALID_FILE):
         
         with torch.no_grad():
             for i in range(num_steps - 1):
-                # Pack input: [dt, log_T, log_HI, log_HII] natively on GPU
-                curr_state = trajectory_log[i:i+1, :]  # Shape (1, 3)
-                curr_dt = dt_tensor[i:i+1, :]          # Shape (1, 1)
-                raw_in_ar = torch.cat([curr_dt, curr_state], dim=1)
+                # Take previous prediction [log_T, log_HI, log_HII] (or IC in the first timestep).
+                curr_state = trajectory_log[i:i+1, :]
                 
                 # Normalize, Forward Pass, Denormalize
-                norm_in_ar = (raw_in_ar - t_in_mean) / (t_in_std + 1e-8)
+                norm_in_ar = (curr_state - t_in_mean) / (t_in_std + 1e-8)
                 pred_norm_ar = model(norm_in_ar)
                 dlog_y_ar = pred_norm_ar * (t_tg_std + 1e-8) + t_tg_mean
                 
@@ -176,9 +170,9 @@ def visualise_preds(VALID_FILE):
         
         # Save mechanism
         if 'BEST' not in MODEL_NAME:
-            out_name = 'test_fig.png'
+            out_name = 'test_fig_noClamp_Long.png'
         else:
-            out_name = 'test_fig_BEST.png'
+            out_name = 'test_fig_BEST_noClamp_Long.png'
             
         plt.savefig(out_name, dpi=150)
         print(f"Visualisation saved as '{out_name}'")

@@ -11,7 +11,7 @@ class GrackleDataset(Dataset):
     def __init__(self, folder_path, pattern="output_*.dat"):
         """
         Load multiple Grackle simulations (will be our inputs).
-        PINN's input  (x): [dt, log(y(t))] (and standardised), for y = T, nHI, nHII
+        PINN's input  (x): [log(y(t))] (and standardised), for y = T, nHI, nHII
         PINN's output (y): [log(y(t+dt)/y(t))] (and standardised), for y = T, nHI, nHII
         """
         self.all_inputs = []
@@ -32,7 +32,7 @@ class GrackleDataset(Dataset):
             # // ---- Targets [log(T(t+dt)/T(t)), log(nHI(t+dt)/nHI(t)), log(nHII(t+dt)/nHII(t))] for every timestep ---- \\
             
             # Extract its state vectors, and convert to physical units
-            dt = data.iloc[1:, 2].values.astype(np.float64) # Vector of dt's (ignoring the initial dt)
+            # dt = data.iloc[1:, 2].values.astype(np.float64) # Vector of dt's (ignoring the initial dt)
             T = data.iloc[:, 3].values.astype(np.float64)
             nHI = data.iloc[:, 6].values.astype(np.float64)
             nHII = data.iloc[:, 7].values.astype(np.float64)
@@ -50,7 +50,7 @@ class GrackleDataset(Dataset):
             nHII_targ = np.log(nHII_next)-np.log(nHII_curr)  # log(nHII(t+dt)/nHII(t))
 
             # Stack into (N, 4) and (N, 3), respectively.
-            inputs = np.stack([dt, np.log(T_curr), np.log(nHI_curr), np.log(nHII_curr)], axis=1)
+            inputs = np.stack([np.log(T_curr), np.log(nHI_curr), np.log(nHII_curr)], axis=1)
             targets = np.stack([T_targ, nHI_targ, nHII_targ], axis=1)
 
             self.all_inputs.append(inputs)
@@ -108,10 +108,10 @@ if __name__ == "__main__":
         print(f"✓ Dataset multi-file loaded: {len(ds)} total data points.")
         
         x, y = ds[0]
-        print(f"✓ Example of input (t, T0, HI0, HII0): {x.numpy()}")
-        print(f"✓ Example of output  (T, HI, HII): {y.numpy()}")
+        print(f"✓ Example of input (T0, nHI0, nHII0): {x.numpy()}")
+        print(f"✓ Example of output  (T1/T0, nHI1/nHI0, nHII1/nHII0): {y.numpy()}")
         
-        if x.shape[0] != 4:
-            print("✗ Error: The input dimension should be 4.")
+        if x.shape[0] != 3:
+            print("✗ Error: The input dimension should be 3.")
     except Exception as e:
         print(f"✗ Error: {e}")

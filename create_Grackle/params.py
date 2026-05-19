@@ -1,6 +1,6 @@
 import numpy as np
 
-# Number of independent simulations
+# Number of independent simulations.
 num_sims = 1000
 
 # Physical bounds based on Grackle limits

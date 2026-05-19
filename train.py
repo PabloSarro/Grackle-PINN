@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import argparse
 from model import PINN
+from ComputeMSE import ComputeMSE
 from torch.utils.data import DataLoader
 from data_utils import GrackleDataset
 from physics import GrackleRates, PhysicsLossManager
@@ -24,22 +25,22 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 print(f"Training Precision: {torch.get_default_dtype()}")
 
-MODEL_NAME = f"PINN_{args.precision}.pth"
-BEST_NAME = f"PINN_BEST_{args.precision}.pth"
-SCALING_NAME = f"scaling_params_PINN_{args.precision}.pth"
-DATA_PATH = "Grackle_100yr_3/" # Path where the output_*.dat are located
+MODEL_NAME = f"PINN.pth"#{args.precision}.pth"
+BEST_NAME = f"PINN_BEST.pth"#{args.precision}.pth"
+SCALING_NAME = f"scaling_params.pth"#_PINN_{args.precision}.pth"
+DATA_PATH = "Train_Stratified/" # Path where the output_*.dat are located
 
-BATCH_SIZE = 16384 # 8192
-LEARNING_RATE = 1.0e-4
-EPOCHS = 50
-LAMBDA_PHYS = 1.0
+BATCH_SIZE = 4096 # 16384 # 8192 # 2048
+LEARNING_RATE = 1.0e-3
+EPOCHS = 1000
+LAMBDA_COOL = 0.0
 
 # Data Loading
 dataset = GrackleDataset(folder_path=DATA_PATH)
 dataloader = DataLoader(
     dataset, 
     batch_size=BATCH_SIZE, 
-    shuffle=True, 
+    shuffle=True,
     num_workers=4,
     pin_memory=True
 )
@@ -52,7 +53,7 @@ torch.save({
 print(f"Scaling parameters saved to {SCALING_NAME}")
 
 # Model, Optimiser, and Loss
-model = PINN(input_dim=4, output_dim=3, hidden_dim=128, hidden_layers=8).to(device)
+model = PINN(input_dim=4, output_dim=3, hidden_dim=256, hidden_layers=6).to(device)
 grackle_phys = GrackleRates()
 phys_manager = PhysicsLossManager(
     model, 
@@ -63,43 +64,56 @@ phys_manager = PhysicsLossManager(
     tg_std=dataset.tg_std.to(device)
 )
 optimiser = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE) # DEBUG: Try Ethan's suggestion!
-criterion = nn.MSELoss()
+# criterion = nn.MSELoss()
 
 print(f"Starting training on {len(dataset)} points...")
 
 # 5. Training Loop
 best_loss = float('inf')
+times_best_saved = 0
 
 start_time = time.time()
 for epoch in range(EPOCHS):
     # print(f"Epoch {epoch+1}")
     model.train()
     total_data_loss = 0
-    total_phys_loss = 0
-    # batch_num = 0
+    total_mass_loss = 0
+    total_cool_loss = 0
+    batch_num = 0
     for batch_x, batch_y in dataloader:
         # print(f"Batch {batch_num+1}")
-        # batch_num += 1
+        batch_num += 1
         # Move data to GPU
         batch_x = batch_x.to(device)
         batch_y = batch_y.to(device)
         
-        batch_x.requires_grad = True
+        # batch_x.requires_grad = True ---> NOT USED FOR NOW, ONLY IF I DID: torch.autograd.grad(...) FOR DERIVATIVES IN 'physics.py'
         optimiser.zero_grad()
         
         # Forward pass and losses
         predictions = model(batch_x)
-        loss_data = criterion(predictions, batch_y)
-        loss_phys = phys_manager.get_residuals(batch_x, predictions)
+        # --- THE WEIGHTED DATA LOSS ---
+        # If batch_y is close to 0, weight is ~1.0
+        # If batch_y is large (a shock), weight becomes massive.
+        # The factor 20.0 is an aggressive multiplier to force it to fit the spikes.
+        weights = 1.0 + 20.0 * torch.abs(batch_y) 
         
-        # Total combined loss with weighting
-        loss = loss_data + LAMBDA_PHYS * loss_phys
+        # Calculate element-wise squared error, multiply by weights, then mean
+        loss_data = torch.mean(weights * (predictions - batch_y)**2)
+        # loss_data = criterion(predictions, batch_y)
+        loss_mass, loss_cool = phys_manager.get_residuals(batch_x, predictions)
+
+        LAMBDA_MASS = 1e4*(epoch)/(EPOCHS-1)  
+        
+        # Total combined loss with weightings
+        loss = loss_data + LAMBDA_MASS * loss_mass # + LAMBDA_COOL * loss_cool
 
         # --- DEBUG BLOCK ---
         if torch.isnan(loss):
             print(f"\n[!] NAN DETECTED at Epoch {epoch+1}")#, Batch {batch_num}")
             print(f"Data Loss: {loss_data.item():.4e}")
-            print(f"Phys Loss: {loss_phys.item():.4e}")
+            print(f"Mass Loss: {loss_mass.item():.4e}")
+            print(f"Cool Loss: {loss_cool.item():.4e}")
             print(f"Preds Max/Min: {predictions.max().item():.2f} / {predictions.min().item():.2f}")
             print(f"Inputs Max/Min: {batch_x.max().item():.2f} / {batch_x.min().item():.2f}")
             
@@ -110,64 +124,40 @@ for epoch in range(EPOCHS):
             # Stop the execution so you don't waste cluster credits
             import sys; sys.exit(1)
         # -----------------------------
-        
 
         # Backward pass
         loss.backward()
-
-        # # --- DETAILED GRADIENT INSPECTION ---
-        # print("\n--- Gradient Breakdown ---")
-        # for name, param in model.named_parameters():
-        #     if param.grad is not None:
-        #         grad_max = param.grad.data.abs().max().item()
-        #         grad_mean = param.grad.data.abs().mean().item()
-        #         print(f"Layer: {name:10} | Max Grad: {grad_max:.2e} | Mean Grad: {grad_mean:.2e}")
-        #     else:
-        #         print(f"Layer: {name:10} | No Gradient")
-
-        # # --- GRADIENT MONITORING BLOCK ---
-        # total_norm = 0.0
-        # max_grad = 0.0
-        # for p in model.parameters():
-        #     if p.grad is not None:
-        #         param_norm = p.grad.data.norm(2).item()
-        #         total_norm += param_norm ** 2
-        #         max_grad = max(max_grad, p.grad.data.abs().max().item())
-        # total_norm = total_norm ** 0.5
-
-        # if torch.isnan(torch.tensor(total_norm)) or total_norm > 1e6:
-        #     print(f"\n[!] EXPLODING GRADIENT DETECTED")
-        #     print(f"    Total Gradient Norm: {total_norm:.4e}")
-        #     print(f"    Max Absolute Gradient: {max_grad:.4e}")
-        #     print(f"    Current Data Loss: {loss_data.item():.4e}")
-        #     print(f"    Current Phys Loss: {loss_phys.item():.4e}")
-            
-            # This identifies which loss is driving the explosion
-            # If phys_loss is 1e20, it's the physics constraints
-
-        # Temporarily calculate gradients for one component at a time to debug
-        # (Do this only if the main loss is NaN)
         
         # Gradient Clipping
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # max_norm usually set to 0.5 to 10 times the average gradient norm. Consider increasing to 10 or 20 if PINN clips gradients too aggressively.
+        total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=100.0) # max_norm usually set to 0.5 to 10 times the average gradient norm.
+        if (batch_num < 10) and (epoch % 100) == 0:
+            print(f"[Diagnostics] True Gradient Norm: {total_norm.item():.4f}")
+
         optimiser.step()
         
         total_data_loss += loss_data.item()
-        total_phys_loss += loss_phys.item()
+        total_mass_loss += loss_mass.item()
+        total_cool_loss += loss_cool.item()
     
     avg_data_loss = total_data_loss / len(dataloader)
-    avg_phys_loss = total_phys_loss / len(dataloader)
-    print(f"Epoch [{epoch+1}/{EPOCHS}] - Avg Data Loss: {avg_data_loss:.6e}, Avg Physics Loss: {avg_phys_loss:.6e}")
+    avg_mass_loss = total_mass_loss / len(dataloader)
+    avg_cool_loss = total_cool_loss / len(dataloader)
+    print(f"Epoch [{epoch+1}/{EPOCHS}] - Avg Data Loss: {avg_data_loss:.6e}, Avg Mass Loss: {avg_mass_loss:.6e}, Avg Cool Loss: {avg_cool_loss:.6e}")
 
     # Save the best model so far.
-    avg_loss = avg_data_loss + LAMBDA_PHYS * avg_phys_loss
+    avg_loss = avg_data_loss # + LAMBDA_MASS * loss_mass + LAMBDA_COOL * loss_cool
     if avg_loss < best_loss:
         best_loss = avg_loss
         torch.save(model.state_dict(), BEST_NAME)
-        print(f"[✓] New best model saved (avg_loss={best_loss:.4e})")
+
+        if (times_best_saved % 20) == 0:
+            print(f"[✓] New best model saved ---> MSE_loss={ComputeMSE(model, dataloader, device, BATCH_SIZE):.4e})")
+        else:
+            print(f"[✓] New best model saved ---> AVG_loss={avg_loss:.4e})")
+        times_best_saved += 1
 
 
 end_time = time.time()
 print(f"Training complete in {end_time - start_time:.2f} seconds.")
 torch.save(model.state_dict(), MODEL_NAME)
-print(f"[✓] Final model saved (avg_loss={avg_loss:.4e})")
+print(f"[✓] Final model saved ---> MSE_loss={ComputeMSE(model, dataloader, device, BATCH_SIZE):.4e})")

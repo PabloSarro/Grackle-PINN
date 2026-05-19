@@ -37,7 +37,13 @@ class GrackleRates:
         k2 = (4.881357e-6 * torch.pow(T, -1.5) * torch.pow((1.0 + 1.14813e2 * torch.pow(T, -0.407)), -2.242))
         k2 = torch.where(T < 1.0e9, k2, torch.full_like(T, self.tiny))
 
-        return k1, k2
+        # // ----- NOT CONSIDERED FOR NOW, SINCE IT HAPPENS TO ADD NOISE TO THE PHYSICS LOSS! ----- \\
+        # k7 (k57 in source): HI + HI -> HII + HI + e
+        # Can be found in line 678 of grackle/src/clib/rate_functions.c
+        k7 = 1.2e-17 * torch.pow(T, 1.2) * torch.exp(-157800.0 / T)
+        k7 = torch.where(T > 3000.0, k7, torch.full_like(T, self.tiny))
+
+        return k1, k2, k7
 
     
     def compute_cooling_rates(self, T, nHI, nHII, ne):
@@ -103,52 +109,121 @@ class PhysicsLossManager:
         DEBUG_helper("get_residuals: Input batch_x", batch_x)
         DEBUG_helper("get_residuals: Input preds", preds)
 
-        # --------------------------------------------------------------------------- #
-        # ------------ INPUT: [dt, log(T(t)), log(nHI(t)), log(nHII(t))] ------------ #
-        # ------------ OUTPUT: [log(y(t+dt)/T(t))], for y = T, nHI, nHII ------------ #
-        # --------------------------------------------------------------------------- #
+        # =============================================================================
+        # ============= INPUT: [dt, log(T(t)), log(nHI(t)), log(nHII(t))] =============
+        # ============= OUTPUT: [log(y(t+dt)/T(t))], for y = T, nHI, nHII =============
+        # =============================================================================
 
-        # // ----- COMPUTATION OF PHYSICAL LOSS FUNCTIONS ----- \\
-        # The rate equations are in linear space (dy/dt = ...)
-        # Our inputs and outputs are standardised and in log-space.
-        # Hence we first linearise them.
+
+        # ==============================================================================
+        # =================== COMPUTATION OF PHYSICAL LOSS FUNCTIONS ===================
+        # ==============================================================================
+
+
+
+        # ==============================================================================
+        # ========================= 1. EXTRACT INPUTS & OUTPUTS ========================
+        # ==============================================================================
+
+        # Denormalise inputs and outputs for physics loss computations.
         input_destand = batch_x*(self.in_std + 1e-8) + self.in_mean
         output_destand = preds*(self.tg_std + 1e-8) + self.tg_mean
-
-        #       // ----- 1. LHS: dy/dt ----- \\
+        
         # Linearise (remove log-space)
         dt = input_destand[:, 0:1] * SEC_PER_YEAR
-        log_T_t = input_destand[:, 1:2]
-        log_nHI_t = input_destand[:, 2:3]
-        log_nHII_t = input_destand[:, 3:4]
+        log_T = input_destand[:, 1:2]
+        log_nHI = input_destand[:, 2:3]
+        log_nHII = input_destand[:, 3:4]
 
         log_T_ratio = torch.clamp(output_destand[:, 0:1], min=-10.0, max=10.0)
-        log_nHI_ratio = torch.clamp(output_destand[:, 1:2], min=-15.0, max=15.0)
-        log_nHII_ratio = torch.clamp(output_destand[:, 2:3], min=-15.0, max=15.0)
+        log_nHI_ratio = output_destand[:, 1:2]
+        log_nHII_ratio = output_destand[:, 2:3]
 
-        T = torch.exp(log_T_t)
-        nHI = torch.exp(log_nHI_t)
-        nHII = torch.exp(log_nHII_t)
+        T = torch.exp(log_T)
+        nHI = torch.exp(log_nHI)   # Instead of using this, for 2.1 we will use torch.logsumexp(...)
+        nHII = torch.exp(log_nHII) # Instead of using this, for 2.1 we will use torch.logsumexp(...)
 
-        T_next = T * torch.exp(log_T_ratio)
-        nHI_next = nHI * torch.exp(log_nHI_ratio)
-        nHII_next = nHII * torch.exp(log_nHII_ratio)
+        # Prevent wild predictions from causing overflow in Grackle analytical fits
+        T_next = torch.clamp(T * torch.exp(log_T_ratio), min=1.0, max=1e9)
+        nHI_next = torch.clamp(nHI * torch.exp(log_nHI_ratio), min=1e-16, max=1e5)
+        nHII_next = torch.clamp(nHII * torch.exp(log_nHII_ratio), min=1e-16, max=1e5)
 
         DEBUG_helper("T/dt:", T/dt)
         DEBUG_helper("nHI/dt:", nHI/dt)
         DEBUG_helper("nHII/dt:", nHII/dt)
         DEBUG_helper("expm1:", torch.expm1(log_T_ratio))
         
-        dT_dt = (T/dt)*torch.expm1(log_T_ratio)           # = (T_next-T)/dt ~ dT/dt                  # DEBUG: Not used???
-        dnHI_dt = (nHI/dt)*torch.expm1(log_nHI_ratio)     # = (nHI_next-nHI)/dt ~ dnHI/dt
-        dnHII_dt = (nHII/dt)*torch.expm1(log_nHII_ratio)  # = (nHII_next-nHII)/dt ~ dnHII/dt
-        DEBUG_helper("dT/dt", dT_dt)
-        DEBUG_helper("dnHI/dt", dnHI_dt)
-        DEBUG_helper("dnHII/dt", dnHII_dt)
+
+        # ========================================================================
+        # ========================== NO LONGER NEEDED ??? ========================
+        # ========================================================================
+
+        # dT_dt = (T/dt)*torch.expm1(log_T_ratio)           # = (T_next-T)/dt ~ dT/dt                  # DEBUG: Not used???
+        # dnHI_dt = (nHI/dt)*torch.expm1(log_nHI_ratio)     # = (nHI_next-nHI)/dt ~ dnHI/dt
+        # dnHII_dt = (nHII/dt)*torch.expm1(log_nHII_ratio)  # = (nHII_next-nHII)/dt ~ dnHII/dt
+        # DEBUG_helper("dT/dt", dT_dt)
+        # DEBUG_helper("dnHI/dt", dnHI_dt)
+        # DEBUG_helper("dnHII/dt", dnHII_dt)
+
 
         
+        
+        # ========================================================================
+        # ========================= 2.1 MASS CONSERVATION ========================
+        # ========================================================================
+        # ========================== [n_HI + n_HII = C] ==========================
+        # ========================================================================
 
-        # // ---------- 2.1 RHS: Lagrangian energy eq ---------- \\
+        # nH_initial = nHI + nHII                                           # ---> we want it in LOG-SPACE!
+        # log(nH_initial) = log( exp(log_nHI) + exp(log_nHII) )             # Bound to gradient explosion...
+        log_nH_initial = torch.logsumexp(torch.cat([log_nHI, log_nHII], dim=1), dim=1, keepdim=True) # Not anymore!
+        
+        # nH_next = nHI_next + nHII_next                                    # ---> same problem --> LOG-SPACE!
+        log_nHI_next_pred = log_nHI + log_nHI_ratio
+        log_nHII_next_pred = log_nHII + log_nHII_ratio
+        # log(nH_next) = log( exp(log_nHI_next) + exp(log_nHII_next) )      # We use the same trick
+        log_nH_next_pred = torch.logsumexp(torch.cat([log_nHI_next_pred, log_nHII_next_pred], dim=1), dim=1, keepdim=True)
+        DEBUG_helper("log_nH_initial", log_nH_initial)
+        DEBUG_helper("log_nH_next_pred", log_nH_next_pred)
+
+
+        # ========================================================================
+        # ====================== 2.1 CHEMICAL RATE EQUATIONS =====================
+        # ========================================================================
+        # ================= (STIFFNESS / NUMERICAL CANCELLATION) =================
+        # ========================================================================
+
+        # dn/dt = gain(n) - loss(n)
+
+        # Goal: Compute gain(n), loss(n), where:
+        #   gain(n) / loss(n): k_{ij}*n_i*n_j, where
+        #       k_{ij}: rate at which species i,j can chemically react (dep. on T).
+        #       n_i, n_j: species density for the species i,j, respectively.
+
+        # # 2.1.1. Compute the chemical rates.
+        # k1, k2, _ = self.phys.compute_chemical_rates(T_next) # Again, implicit formulation
+        # DEBUG_helper("k1_next", k1)
+        # DEBUG_helper("k2_next", k2)
+        # # k7 = rates['k7']
+
+        # # 2.1.2. Compute the gain and loss terms (both with an implicit formulation).
+        # ionisation = k1*nHI_next*ne_next
+        # recombination = k2*nHII_next*ne_next
+        # DEBUG_helper("ionisation", ionisation)
+        # DEBUG_helper("recombination", recombination)
+
+        # # 2.1.3. Compute dnHI/dt, dnHII/dt
+        # nHI_react = recombination - ionisation # k2*nHII*ne - k1*nHI*ne
+        # nHII_react = ionisation - recombination # k1*nHI*ne - k2*nHII*ne
+        # DEBUG_helper("nHI_react", nHI_react)
+        # DEBUG_helper("nHII_react", nHII_react)
+
+
+        # ========================================================================
+        # ===================== 2.2 LAGRANGIAN ENERGY EQUATION ===================
+        # ========================================================================
+        # =========================== [du/dt = -e_cool] ==========================
+        # ========================================================================
 
         # Goal: Isolate dT/dt out of the Lagrangian Energy Equation:
         #       du/dt = -e_cool + e_heat
@@ -166,12 +241,12 @@ class PhysicsLossManager:
         # Hence, our physics equation becomes:
         #       -e_cool = (u_{next}-u_{curr}) / dt
 
-        # 2.1.1. Compute LHS.
+        # 2.2.1. Compute LHS.
         ne = nHII # + nHeII + 2 * nHeIII, but these last were assumed to be 0 --> cooling box model
         ne_next = nHII_next
         e_cool = self.phys.compute_cooling_rates(T_next, nHI_next, nHII_next, ne_next) # Implicit formulation
 
-        # 2.1.2. Compute RHS.
+        # 2.2.2. Compute RHS.
         n_tot = nHI + nHII + ne
         n_tot_next = nHI_next + nHII_next + ne_next
         
@@ -183,170 +258,40 @@ class PhysicsLossManager:
         DEBUG_helper("du/dt", du_dt)
 
 
-        #    // ---------- 2.2 RHS: chemical rate eq ---------- \\
 
-        # dn/dt = gain(n) - loss(n)
+        # ======================================================================
+        # =============== 3. PHYSICAL LOSS COMPUTATION (LOG-MSE) ===============
+        # ======================================================================
+        # ================= (ALTERNATIVE: USE NORMALISED LOSS) =================
+        # ======================================================================
+        
+        def log_signed_mse(lhs, rhs, weight_sign, eps):
+            log_abs_lhs = torch.log10(torch.abs(lhs) + eps)
+            log_abs_rhs = torch.log10(torch.abs(rhs) + eps)
+            magn_loss = (log_abs_lhs - log_abs_rhs)**2
+                
+            # 2. Sign Penalty (0 if signs match, 'weight_sign' if opposite)
+            sign_mismatch = (torch.sign(lhs) != torch.sign(rhs)).float()
+            return magn_loss + weight_sign*sign_mismatch
+        
 
-        # Goal: Compute gain(n), loss(n), where:
-        #   gain(n) / loss(n): k_{ij}*n_i*n_j, where
-        #       k_{ij}: rate at which species i,j can chemically react (dep. on T).
-        #       n_i, n_j: species density for the species i,j, respectively.
-
-        # 2.2.1. Compute the chemical rates.
-        k1, k2 = self.phys.compute_chemical_rates(T_next) # Again, implicit formulation
-        DEBUG_helper("k1_next", k1)
-        DEBUG_helper("k2_next", k2)
-        # k7 = rates['k7']
-
-        # 2.2.2. Compute the gain and loss terms (both with an implicit formulation).
-        ionisation = k1*nHI_next*ne_next
-        recombination = k2*nHII_next*ne_next
-        DEBUG_helper("ionisation", ionisation)
-        DEBUG_helper("recombination", recombination)
-
-        # 2.2.3. Compute dnHI/dt, dnHII/dt
-        nHI_react = recombination - ionisation # k2*nHII*ne - k1*nHI*ne
-        nHII_react = ionisation - recombination # k1*nHI*ne - k2*nHII*ne
-        DEBUG_helper("nHI_react", nHI_react)
-        DEBUG_helper("nHII_react", nHII_react)
-
-
-        # // ----- 3. Physical Loss Computation --> log-MSE = (log(LHS)-log(RHS))^2 ----- \\
-        # Alternative: USE NORMALISED LOSS
-        eps = 1e-35
-
-        # 3.1. Temperature
-        log_cool = torch.log10(torch.abs(e_cool) + eps)
-        log_du_dt = torch.log10(torch.abs(du_dt) + eps)
-        log_T_mse = (log_cool - log_du_dt)**2
-        DEBUG_helper("log_cool", log_cool)
-        DEBUG_helper("log_du_dt", log_du_dt)
-        DEBUG_helper("Physics Loss (log-MSE): nT", log_T_mse)
-
-        # 3.2. Species (nHI)
-        log_dnHI_dt = torch.log10(torch.abs(dnHI_dt) + eps)
-        log_nHI_react = torch.log10(torch.abs(nHI_react) + eps)
-        log_nHI_mse = (log_dnHI_dt - log_nHI_react)**2
-        DEBUG_helper("log_dnHI_dt", log_dnHI_dt)
-        DEBUG_helper("log_nHI_react", log_nHI_react)
-        DEBUG_helper("Physics Loss (log-MSE): nHI", log_nHI_mse)
-
-        # 3.3. Species (nHII)
-        log_dnHII_dt = torch.log10(torch.abs(dnHII_dt) + eps)
-        log_nHII_react = torch.log10(torch.abs(nHII_react) + eps)
-        log_nHII_mse = (log_dnHII_dt - log_nHII_react)**2
-        DEBUG_helper("log_dnHII_dt", log_dnHII_dt)
-        DEBUG_helper("log_nHII_react", log_nHII_react)
-        DEBUG_helper("Physics Loss (log-MSE): nHII", log_nHII_mse)
+        log_mass_mse = (log_nH_next_pred - log_nH_initial)**2                                   # 3.1. Species (nHI, nHII)
+        log_cool_mse = log_signed_mse(lhs=du_dt, rhs=-e_cool, weight_sign = 10.0, eps = 1e-35)  # 3.2. Temperature
+        DEBUG_helper("Physics Loss (log-MSE): nHI, nHII", log_mass_mse)
+        DEBUG_helper("Physics Loss (log-MSE): T", log_cool_mse)
+        
 
         # --- DIAGNOSTIC PRINT BLOCK ---
         if print_samples:
-            batch_size = batch_x.shape[0]
+            batch_size = 20
             print(f"\n--- Batch Physics Comparison ({batch_size} samples) ---")
             for i in range(batch_size):
-                print(f"Sample {i+1} (T: {T[i,0]}):")
-                print(f"  Temp: LHS (e_cool)   = {e_cool[i, 0].item():12.4e} | RHS (du_dt)      = {du_dt[i, 0].item():12.4e} | log-MSE     = {log_T_mse[i, 0].item():12.4e}")
-                print(f"  nHI : LHS (dnHI_dt)  = {dnHI_dt[i, 0].item():12.4e} | RHS (nHI_react)  = {nHI_react[i, 0].item():12.4e} | log-MSE     = {log_nHI_mse[i, 0].item():12.4e}")
-                print(f"  nHII: LHS (dnHII_dt) = {dnHII_dt[i, 0].item():12.4e} | RHS (nHII_react) = {nHII_react[i, 0].item():12.4e} | log-MSE     = {log_nHII_mse[i, 0].item():12.4e}")
-            print("-" * 55)
+                print(f"Sample {i+1} (T: {T[i,0].item():.2e}):")
+                print(f"  Mass : Initial nH   = {log_nH_initial[i, 0].item():12.4e} | Next nH = {log_nH_next_pred[i, 0].item():12.4e} | Log-Mass-MSE = {log_mass_mse[i, 0].item():12.4e}")
+                print(f"  Temp :  -e_cool     = {-e_cool[i, 0].item():12.4e} |  du_dt  = {du_dt[i, 0].item():12.4e} | Log-Cool-MSE = {log_cool_mse[i, 0].item():12.4e}")
+                print("-" * 55)
+            print(f"  Mean-Log-Mass-MSE = {torch.mean(log_mass_mse):12.4e}")
+            print(f"  Mean-Log-Cool-MSE = {torch.mean(log_cool_mse):12.4e}")
 
-        physics_loss = log_T_mse + log_nHI_mse + log_nHII_mse
-        return torch.mean(physics_loss)
-
-
-# ---------------------------------------------------------
-# Ground Truth Verification Block
-# Append to the bottom of physics.py
-# ---------------------------------------------------------
-if __name__ == "__main__":
-    import pandas as pd
-    import random
-    import glob
-    import os
-    torch.set_default_dtype(torch.float64)
-
-    print("--- Verifying GrackleRates against Ground Truth Data ---")
-    
-    DATA_FOLDER = "Test_100yr/"
-    NUM_SAMPLES = 20
-
-    device = torch.device("cpu")
-
-    def compute_global_scaling(folder_path, pattern="output_*.dat"):
-        """
-        Computes global mean and std from all files in the directory.
-        """
-        files = glob.glob(os.path.join(folder_path, pattern))
-        if not files:
-            raise FileNotFoundError(f"No files found matching {pattern} in {folder_path}")
-            
-        print(f"Loading {len(files)} files...")
-        all_inputs, all_targets = [], []
-        
-        for f in files:
-            data = pd.read_csv(f, comment='#', sep='\s+', header=None)
-            
-            # Extract columns
-            dt = data.iloc[1:, 2].values.astype(np.float64)
-            T = data.iloc[:, 3].values.astype(np.float64)
-            nHI = data.iloc[:, 6].values.astype(np.float64)
-            nHII = data.iloc[:, 7].values.astype(np.float64)
-            
-            # State vectors
-            T_curr, T_next = T[:-1], T[1:]
-            nHI_curr, nHI_next = nHI[:-1], nHI[1:]
-            nHII_curr, nHII_next = nHII[:-1], nHII[1:]
-            
-            # Formulate Log-Inputs and Log-Ratios
-            inputs = np.stack([dt, np.log(T_curr), np.log(nHI_curr), np.log(nHII_curr)], axis=1)
-            targets = np.stack([
-                np.log(T_next) - np.log(T_curr),
-                np.log(nHI_next) - np.log(nHI_curr),
-                np.log(nHII_next) - np.log(nHII_curr)
-            ], axis=1)
-            
-            all_inputs.append(inputs)
-            all_targets.append(targets)
-
-        all_inputs = torch.from_numpy(np.concatenate(all_inputs, axis=0)).double()
-        all_targets = torch.from_numpy(np.concatenate(all_targets, axis=0)).double()
-
-        in_mean = all_inputs.mean(dim=0).to(device)
-        in_std = all_inputs.std(dim=0).to(device)
-        tg_mean = all_targets.mean(dim=0).to(device)
-        tg_std = all_targets.std(dim=0).to(device)
-
-        print("Dataset Loaded.")
-        
-        return all_inputs, all_targets, in_mean, in_std, tg_mean, tg_std
-
-    try:
-        all_inputs, all_targets, in_mean, in_std, tg_mean, tg_std = compute_global_scaling(DATA_FOLDER)
-
-        grackle_phys = GrackleRates()
-        phys_manager = PhysicsLossManager(
-            model=None, 
-            grackle_phys=grackle_phys, 
-            in_mean=in_mean, 
-            in_std=in_std,
-            tg_mean=tg_mean,
-            tg_std=tg_std
-        )
-
-        # 3. Standardize the entire dataset
-        inputs_scaled = (all_inputs.to(device) - in_mean) / (in_std + 1e-8)
-        targets_scaled = (all_targets.to(device) - tg_mean) / (tg_std + 1e-8)
-        
-        total_rows = len(inputs_scaled)
-        indices = sorted(random.sample(range(total_rows), min(NUM_SAMPLES, total_rows)))
-        
-        batch_x = inputs_scaled[indices]
-        batch_y = targets_scaled[indices]
-        
-        with torch.no_grad():
-            # Set print_samples=True to trigger the diagnostic block
-            loss = phys_manager.get_residuals(batch_x, batch_y, print_samples=True)
-            print(f"\n[✓] Total Log-MSE Physics Loss on Sampled Ground Truth: {loss.item():.4e}")
-
-    except Exception as e:
-        print(f"\n[!] Error during verification: {e}")
+        # physics_loss = log_mass_mse + log_cool_mse
+        return torch.mean(log_mass_mse), torch.mean(log_cool_mse)

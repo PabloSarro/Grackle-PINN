@@ -7,25 +7,26 @@ __pycache__/
 EnvPablo/
 
 # --- Simulation Data ---
-# The 10 million samples are way too big for Git
+Grackle_100yr/
+Results/
+Test_100yr/
+Train_Stratified/
 *.dat
-*.csv
 *.log
-*.out
 *.job
 *.png
 *.pth
+*.err
 *.txt
+*.sh
 
 # --- C/C++ Compiled Files ---
 # Ignore the binaries you compile with gcc
-*.o
-*.so
 cooling-full-integration-100yr
 
-# --- Project Specifics ---
-.vscode/
-.idea/
+# --- Additional Non-important Codes ---
+train_ReLU.py
+helpers/
 
-# --- Credentials & Secrets ---
-.env
+# --- Project Specifics ---
+__pycache__/

@@ -1,5 +1,4 @@
 import torch
-import torch.nn as nn
 import argparse
 from model import PINN
 from ComputeMSE import ComputeMSE
@@ -25,15 +24,14 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 print(f"Training Precision: {torch.get_default_dtype()}")
 
-MODEL_NAME = f"PINN.pth"#{args.precision}.pth"
-BEST_NAME = f"PINN_BEST.pth"#{args.precision}.pth"
-SCALING_NAME = f"scaling_params.pth"#_PINN_{args.precision}.pth"
+MODEL_NAME = f"PINN_noClamp_Long.pth"#{args.precision}.pth"
+BEST_NAME = f"PINN_BEST_noClamp_Long.pth"#{args.precision}.pth"
+SCALING_NAME = f"scaling_params_noClamp_Long.pth"#_PINN_{args.precision}.pth"
 DATA_PATH = "Train_Stratified/" # Path where the output_*.dat are located
 
 BATCH_SIZE = 4096 # 16384 # 8192 # 2048
-LEARNING_RATE = 1.0e-3
-EPOCHS = 1000
-LAMBDA_COOL = 0.0
+LEARNING_RATE = 1.0e-4
+EPOCHS = 6500
 
 # Data Loading
 dataset = GrackleDataset(folder_path=DATA_PATH)
@@ -53,7 +51,7 @@ torch.save({
 print(f"Scaling parameters saved to {SCALING_NAME}")
 
 # Model, Optimiser, and Loss
-model = PINN(input_dim=4, output_dim=3, hidden_dim=256, hidden_layers=6).to(device)
+model = PINN(input_dim=3, output_dim=3, hidden_dim=256, hidden_layers=8).to(device)
 grackle_phys = GrackleRates()
 phys_manager = PhysicsLossManager(
     model, 
@@ -64,6 +62,13 @@ phys_manager = PhysicsLossManager(
     tg_std=dataset.tg_std.to(device)
 )
 optimiser = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE) # DEBUG: Try Ethan's suggestion!
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    optimiser, 
+    mode='min',        # We want to minimize the loss
+    factor=0.5,        # Cut the learning rate in half when triggered
+    patience=20,       # If the loss doesn't reach a new low for 50 epochs, trigger the cut
+    min_lr=1e-6        # Never drop the LR below this absolute floor
+)
 # criterion = nn.MSELoss()
 
 print(f"Starting training on {len(dataset)} points...")
@@ -101,19 +106,18 @@ for epoch in range(EPOCHS):
         # Calculate element-wise squared error, multiply by weights, then mean
         loss_data = torch.mean(weights * (predictions - batch_y)**2)
         # loss_data = criterion(predictions, batch_y)
-        loss_mass, loss_cool = phys_manager.get_residuals(batch_x, predictions)
+        loss_mass = phys_manager.get_residuals(batch_x, predictions)
 
         LAMBDA_MASS = 1e4*(epoch)/(EPOCHS-1)  
         
         # Total combined loss with weightings
-        loss = loss_data + LAMBDA_MASS * loss_mass # + LAMBDA_COOL * loss_cool
+        loss = loss_data + LAMBDA_MASS * loss_mass
 
         # --- DEBUG BLOCK ---
         if torch.isnan(loss):
             print(f"\n[!] NAN DETECTED at Epoch {epoch+1}")#, Batch {batch_num}")
             print(f"Data Loss: {loss_data.item():.4e}")
             print(f"Mass Loss: {loss_mass.item():.4e}")
-            print(f"Cool Loss: {loss_cool.item():.4e}")
             print(f"Preds Max/Min: {predictions.max().item():.2f} / {predictions.min().item():.2f}")
             print(f"Inputs Max/Min: {batch_x.max().item():.2f} / {batch_x.min().item():.2f}")
             
@@ -129,7 +133,7 @@ for epoch in range(EPOCHS):
         loss.backward()
         
         # Gradient Clipping
-        total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=100.0) # max_norm usually set to 0.5 to 10 times the average gradient norm.
+        total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=50.0) # max_norm usually set to 0.5 to 10 times the average gradient norm.
         if (batch_num < 10) and (epoch % 100) == 0:
             print(f"[Diagnostics] True Gradient Norm: {total_norm.item():.4f}")
 
@@ -137,12 +141,12 @@ for epoch in range(EPOCHS):
         
         total_data_loss += loss_data.item()
         total_mass_loss += loss_mass.item()
-        total_cool_loss += loss_cool.item()
     
     avg_data_loss = total_data_loss / len(dataloader)
     avg_mass_loss = total_mass_loss / len(dataloader)
-    avg_cool_loss = total_cool_loss / len(dataloader)
-    print(f"Epoch [{epoch+1}/{EPOCHS}] - Avg Data Loss: {avg_data_loss:.6e}, Avg Mass Loss: {avg_mass_loss:.6e}, Avg Cool Loss: {avg_cool_loss:.6e}")
+    print(f"Epoch [{epoch+1}/{EPOCHS}] - Avg Data Loss: {avg_data_loss:.6e}, Avg Mass Loss: {avg_mass_loss:.6e}")
+
+    scheduler.step(avg_data_loss)
 
     # Save the best model so far.
     avg_loss = avg_data_loss # + LAMBDA_MASS * loss_mass + LAMBDA_COOL * loss_cool
@@ -150,7 +154,7 @@ for epoch in range(EPOCHS):
         best_loss = avg_loss
         torch.save(model.state_dict(), BEST_NAME)
 
-        if (times_best_saved % 20) == 0:
+        if (times_best_saved % 10) == 0:
             print(f"[✓] New best model saved ---> MSE_loss={ComputeMSE(model, dataloader, device, BATCH_SIZE):.4e})")
         else:
             print(f"[✓] New best model saved ---> AVG_loss={avg_loss:.4e})")

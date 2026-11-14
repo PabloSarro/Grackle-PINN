@@ -1,32 +1,28 @@
-# --- Python Basics ---
+# Python
 __pycache__/
 *.py[cod]
-*$py.class
 
-# --- Virtual Environment ---
+# Environments (live outside the repo: /home/sarro/venvs/grackle-pinn)
 EnvPablo/
+.venv/
 
-# --- Simulation Data ---
-Grackle_100yr/
-Results/
-Test_100yr/
-Train_Stratified/
+# Large or regenerable data and outputs
+data/
+results/
+archive/
 *.dat
-*.log
-*.job
-*.png
 *.pth
+*.npz
 *.err
-*.txt
-*.sh
+Plots*/
 
-# --- C/C++ Compiled Files ---
-# Ignore the binaries you compile with gcc
+# Compiled binaries
 cooling-full-integration-100yr
 
-# --- Additional Non-important Codes ---
-train_ReLU.py
-helpers/
-
-# --- Project Specifics ---
-__pycache__/
+# LaTeX build products
+docs/report/*.aux
+docs/report/*.log
+docs/report/*.out
+docs/report/*.bbl
+docs/report/*.blg
+docs/report/*.pdf

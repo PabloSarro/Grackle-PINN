@@ -1,0 +1,89 @@
+\usepackage{lmodern}
+\usepackage{caption}
+\usepackage{amssymb}
+\usepackage{lipsum}
+\usepackage{cite}
+
+% Page Layout + Graphics + Colours
+% =============================================================
+\RequirePackage[margin=2.5cm]{geometry}
+\usepackage{multicol}
+\RequirePackage{graphicx}
+\RequirePackage{emptypage}
+\RequirePackage{pdfpages} % lets one inject entire, pre-compiled PDF pages into the document, BUT embedded links from the imported PDF are generally not preserved (!)
+
+\RequirePackage[table]{xcolor}
+\definecolor{linkblue}{HTML}{1F497D}
+
+\RequirePackage[most]{tcolorbox}
+
+% =============================================================
+% Fonts & Typography
+% =============================================================
+% fontspec must be loaded before unicode-math
+
+\RequirePackage{microtype}
+\RequirePackage{relsize}
+\RequirePackage{setspace}
+% \setstretch{1.05} % to change inter-line (vertical) spacing if needed
+
+% =============================================================
+% Titles & Lists & Tables
+% =============================================================
+\RequirePackage{titling}
+\RequirePackage{titlesec}
+\RequirePackage{enumitem}
+\RequirePackage{booktabs}
+
+% to make bullets/dots/circles not so big and ugly, using the actual bullet character from the text font, but smaller + raising it to avoid misalignment
+\renewcommand{\labelitemi}{\raisebox{0.2ex}{\scriptsize\textbullet}}
+
+%\titleformat{\section}{\large\bfseries}{\thesection}{1em}{}
+%\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{1em}{}
+
+\RequirePackage[perpage,bottomfloats,belowfloats]{footmisc} 
+
+% =============================================================
+% Language & date
+% =============================================================
+\RequirePackage[british]{babel}
+\RequirePackage{csquotes} % must be loaded after babel for proper quotation handling
+\RequirePackage{datetime2}
+\RequirePackage[super]{nth}
+
+
+% =============================================================
+% Word Counter
+% =============================================================
+\RequirePackage{verbatim}
+
+\newcommand{\quickwordcount}{%
+  % we use our actual 'main.tex' filename here
+  \immediate\write18{texcount -merge -sum=1,1,1,1,0,0,0 -1 -q main.tex > \jobname-words.sum}%
+  % -sum=X1,X2,X3,X4,X5,X6,X7
+  % where X1=Text, X2=Header text, X3=Caption text, X4=Footnote text, X5=Inline math, X6=Displayed math, X7=Inlined math words
+  \input{\jobname-words.sum}%
+}
+% Using biblatex + \printbibliography -> 
+% -> whatever \printbibliography prints is NOT counted
+
+% =============================================================
+% Hyperlinks + Refs (to be loaded last)
+% =============================================================
+\RequirePackage{xurl} % modern version of 'url' package
+\RequirePackage[unicode,
+            psdextra,
+            colorlinks=true,
+            linkcolor=linkblue,    % section/figure/table links
+            citecolor=linkblue,    % citations
+            urlcolor=linkblue,     % URLs
+            filecolor=linkblue,    % file links
+            pdfborder={0 0 0},     % ensure no boxes in some viewers
+            breaklinks=true]{hyperref}
+
+% bookmark is an extension of hyperref and must be loaded after it
+\RequirePackage{bookmark}
+
+% cleveref should be loaded after hyperref
+\RequirePackage{cleveref}
+%\RequirePackage[nameinlink]{cleveref} to get also the name "Eq/Fig/..." to be linked, but beware that this causes hyperref to colour that name too, if colorlinks=true...

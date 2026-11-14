@@ -1,0 +1,19 @@
+#!/bin/bash
+# Usage (account and QOS chosen per TASKS.md section 3.2):
+#   sbatch --account=<acc> --qos=<qos> --export=ALL,CONFIG=configs/<run>.json jobs/train.job
+#SBATCH --job-name=PINNtrain
+#SBATCH --time=24:00:00
+#SBATCH --gres=gpu:1
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=32G
+#SBATCH --partition=gpu
+#SBATCH --output=results/logs/train_%j.log
+
+: "${CONFIG:?set CONFIG=configs/<run>.json}"
+cd "$SLURM_SUBMIT_DIR"
+source /home/sarro/venvs/grackle-pinn/bin/activate
+echo "Starting training at $(date), config $CONFIG"
+python -m grackle_pinn.train --config "$CONFIG" ${RESUME:+--model "$RESUME"}
+echo "Training finished at $(date)"

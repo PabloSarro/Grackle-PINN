@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from data_utils import DEBUG_helper
+from grackle_pinn.data_utils import DEBUG_helper
 
 SEC_PER_YEAR = 86400*365.256363004 # Seconds in a year
 

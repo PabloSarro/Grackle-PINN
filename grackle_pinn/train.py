@@ -1,31 +1,44 @@
 import os
+import json
+import shutil
 import time
 import torch
 import argparse
-from model import PINN
-from ComputeMSE import ComputeMSE
-from data_utils import GrackleDataset
-from physics import PhysicsLossManager
+from grackle_pinn.model import PINN
+from grackle_pinn.metrics import ComputeMSE
+from grackle_pinn.data_utils import GrackleDataset
+from grackle_pinn.physics import PhysicsLossManager
 from torch.utils.data import DataLoader
 
 
-# Initial Paths and Names
-MODEL_NAME = "PINN_fam3_long.pth"
-BEST_NAME = "PINN_BEST_fam3_long.pth"
-SCALING_NAME = "scaling_params_fam3_long.pth"
-LOSSES_NAME = "losses_fam3_long.txt"
-
-TRAIN_PATH = "/scratch/izar/sarro/Fam3_Dataset/train" # Training files
-VALID_PATH = "/scratch/izar/sarro/Fam3_Dataset/valid" # Validation files
-
-MAX_RUNTIME_SECONDS = 12*3600-900 # 1h 45min
+# Run configuration: one JSON file per experiment (see configs/).
+CONFIG_KEYS = dict(
+    run_name=None, train_path=None, valid_path=None, out_dir="results/runs",
+    max_runtime_hours=23.75, batch_size=8192, learning_rate=1.0e-4, epochs=5000,
+    check_every=10, weight_factor=10.0,
+)
 starting_time = time.time()
 
 # Argument Parsing (if refining a pre-trained model)
 parser = argparse.ArgumentParser(description="Train Grackle PINN")
+parser.add_argument('--config', type=str, required=True, help='Path to the JSON configuration of the run')
 parser.add_argument('--model', type=str, default=None, 
                     help='Path to pre-trained model .pth file (leaves it as None to train from scratch)')
 args = parser.parse_args()
+
+cfg = dict(CONFIG_KEYS)
+with open(args.config) as f:
+    cfg.update(json.load(f))
+os.makedirs(os.path.join(cfg["out_dir"], cfg["run_name"]), exist_ok=True)
+_out = lambda name: os.path.join(cfg["out_dir"], cfg["run_name"], name)
+shutil.copy(args.config, _out("config.json"))
+
+MODEL_NAME = _out(f"PINN_{cfg['run_name']}.pth")
+BEST_NAME = _out(f"PINN_BEST_{cfg['run_name']}.pth")
+SCALING_NAME = _out(f"scaling_params_{cfg['run_name']}.pth")
+LOSSES_NAME = _out(f"losses_{cfg['run_name']}.txt")
+TRAIN_PATH, VALID_PATH = cfg["train_path"], cfg["valid_path"]
+MAX_RUNTIME_SECONDS = cfg["max_runtime_hours"] * 3600
 
 # Global Precision Setup: 64-bit arithmetic
 torch.set_default_dtype(torch.float64)
@@ -36,10 +49,10 @@ print(f"Using device: {device}")
 print(f"Training Precision: {torch.get_default_dtype()}")
 
 # Training parameters.
-BATCH_SIZE = 8192 # 16384 # 32768 # 8192 # 4096 # 8192 # 2048
-LEARNING_RATE = 1.0e-4
-EPOCHS = 5000
-CHECK_EVERY = 10 # Epoch frequency for which validation loss is computed.
+BATCH_SIZE = cfg["batch_size"]
+LEARNING_RATE = cfg["learning_rate"]
+EPOCHS = cfg["epochs"]
+CHECK_EVERY = cfg["check_every"] # Epoch frequency for which validation loss is computed.
 
 # Training Data Loading
 dataset = GrackleDataset(folder_path=TRAIN_PATH)
@@ -148,7 +161,7 @@ for epoch in range(EPOCHS):
         predictions = model(batch_x)
 
         # Weighted Data Loss (punishes mistakes in spikes, keeps regular MSE in equilibrium)
-        weights = 1.0 + 10.0 * torch.abs(batch_y)
+        weights = 1.0 + cfg["weight_factor"] * torch.abs(batch_y)
         
         # Calculate element-wise squared error, multiply by weights, then mean
         loss_data = torch.mean(weights * (predictions - batch_y)**2)

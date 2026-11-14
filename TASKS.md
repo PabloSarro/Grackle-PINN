@@ -33,7 +33,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - `[X]` R6 Review `../../Lessandre` and `../../OldFiles`
   - `[X]` R7 Check cluster accounts (jed, then Izar)
 - Quick wins
-  - `[-]` A1 Simplify the repository structure
+  - `[~]` A1 Simplify the repository structure
   - `[-]` A2 Evaluation harness and numeric baseline
   - `[-]` A3 Clean ground-truth generation and dataset rebuild
   - `[-]` A4 State variables with built-in constraints
@@ -49,7 +49,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - `[-]` B7 Training-set sampling strategies
 - Deliverable
   - `[-]` C1 Updated report
-- Next task to start: **A1** (in progress, started 2026-11-14).
+- Next task to start: **A2** (after Pablo's go-ahead). A1 is done apart from the deviations listed in its section.
 
 ## 1. Baseline: what the report states
 
@@ -195,23 +195,38 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 
 ## 5. Tasks: quick wins
 
-### A1. Simplify the repository structure `[-]`
+### A1. Simplify the repository structure `[~]`
 - Goal: one obvious place for code, configs, jobs, data and results; everything needed to reproduce a run is in git.
 - Why: R2. The code behind the report is uncommitted and the evaluation script is lost. The root holds 49 entries and 38 GB (14 GB virtual environment, 15 GB `Active_Files`, 7.3 GB `Families`, about 1,550 regenerable PNGs).
 - Steps:
-  - `[-]` Commit the current working tree as it is and tag it `report-june2026`.
-  - `[-]` Move code to: `grackle_pinn/` (`model.py`, `data_utils.py`, `physics.py`, one `train.py` replacing `train.py` + `train_modelB.py`, `evaluate.py`), `configs/` (one file per experiment), `scripts/datagen/` (`create_Grackle/*`, `Families/*.py`), `scripts/datasets/` (`active.py`, `split.py`, `extract_fam3.py`, `extract_plot_files.py`, `filter_dataset.py`), `scripts/plots/` (the six `plot_*.py` merged into one CLI), `jobs/`, `docs/` (report PDF, `Plots_Report/`).
-  - `[-]` Move data to `data/` (including `Active_Files/`, kept as extra data) and June outputs to `results/legacy/<run>/` (both git-ignored).
-  - `[-]` Move to `archive/`: `helpers/`, loose root files (`ac_traj.dat`, `eq_traj.dat`, `output_1.dat`, `*_analysis.png`), `Eval_Performance/`, `Family3_Files/`.
-  - `[-]` Delete (allowed, section 2): `Plots/`, `Active_Files/Plots_Subfolder/`, `Families/Grid_Files/Plots_Subfolder/`, `__pycache__/`, empty `.err` files.
-  - `[-]` Virtual environment: recreate outside the repo from `requirements.txt` and delete `EnvPablo/` (a venv cannot simply be moved, its scripts contain absolute paths). Check first that the new one imports torch and runs one batch on a GPU node (QOS `debug`).
-  - `[-]` Remove the stale `visualise.py` and `ComputeMSE.py` once their useful parts are in `evaluate.py` (A2); until then keep them under `archive/`.
-  - `[-]` `.gitignore`: stop ignoring `*.job`, `*.sh` and the IC lists.
-  - `[-]` Unpack `Report/Overleaf Report.zip` to `docs/report/` and track the source in git; remove the zip and the duplicate root PDF afterwards (the PDF stays in `docs/`).
-  - `[-]` Rewrite `README.md` (it references `generate_data.sh` at the root and `pinn_performance.png`, which do not exist).
+  - `[X]` Commit the current working tree as it is and tag it `report-june2026`.
+  - `[~]` Move code to: `grackle_pinn/` (`model.py`, `data_utils.py`, `physics.py`, one `train.py` replacing `train.py` + `train_modelB.py`, `evaluate.py`), `configs/` (one file per experiment), `scripts/datagen/` (`create_Grackle/*`, `Families/*.py`), `scripts/datasets/` (`active.py`, `split.py`, `extract_fam3.py`, `extract_plot_files.py`, `filter_dataset.py`), `scripts/plots/` (the six `plot_*.py` merged into one CLI), `jobs/`, `docs/` (report PDF, `Plots_Report/`).
+  - `[X]` Move data to `data/` (including `Active_Files/`, kept as extra data) and June outputs to `results/legacy/<run>/` (both git-ignored).
+  - `[X]` Move to `archive/`: `helpers/`, loose root files (`ac_traj.dat`, `eq_traj.dat`, `output_1.dat`, `*_analysis.png`), `Eval_Performance/`, `Family3_Files/`.
+  - `[X]` Delete (allowed, section 2): `Plots/`, `Active_Files/Plots_Subfolder/`, `Families/Grid_Files/Plots_Subfolder/`, `__pycache__/`, empty `.err` files.
+  - `[X]` Virtual environment: recreate outside the repo from `requirements.txt` and delete `EnvPablo/` (a venv cannot simply be moved, its scripts contain absolute paths). Check first that the new one imports torch and runs one batch on a GPU node (QOS `debug`).
+  - `[~]` Remove the stale `visualise.py` and `ComputeMSE.py` once their useful parts are in `evaluate.py` (A2); until then keep them under `archive/`.
+  - `[X]` `.gitignore`: stop ignoring `*.job`, `*.sh` and the IC lists.
+  - `[X]` Unpack `Report/Overleaf Report.zip` to `docs/report/` and track the source in git; remove the zip and the duplicate root PDF afterwards (the PDF stays in `docs/`).
+  - `[X]` Rewrite `README.md` (it references `generate_data.sh` at the root and `pinn_performance.png`, which do not exist).
 - Effort: 0.5 to 1 day.
 - Success: fresh clone + README reproduces data generation, one training launch and one evaluation; root has under 12 entries; `git status` clean; same loss on one fixed batch before and after the move.
-- Log: none yet.
+- Deviations and open points:
+  - `[~]` `evaluate.py` does not exist yet (A2). The six `plot_*.py` scripts were moved to `scripts/plots/` but not merged into one CLI; they are replaced by `evaluate.py` and the plotting rebuild in A2.
+  - `[~]` `train_modelB.py` is not kept as a script: its differences from `train.py` (paths, 24 h limit, 10,000 epochs, loss weight factor 20) are now `configs/modelB.json`; `configs/fam3_long.json` reproduces the other. Both configs still point to scratch data that no longer exists.
+  - `[~]` `visualise.py`, `ComputeMSE.py`, `train_modelB.py` and the old job files are in `archive/` (ComputeMSE's function is now `grackle_pinn/metrics.py`). `archive/` is git-ignored except for the files that were already tracked.
+  - `[~]` `jobs/train.job` takes the config in `CONFIG` and no account (chosen per submission, section 3.2); the other job files are in `archive/jobs/`.
+  - `[~]` `.gitignore` no longer ignores `*.job` or `*.sh`; the IC lists (`*.txt`) now live in `data/`, which stays ignored, so they are still not in git (they are regenerated by the scripts in A3).
+  - `[~]` Success check "fresh clone reproduces data generation" is not run: the datagen scripts were moved unchanged and A3 rebuilds them.
+- Log:
+  - 2026-11-14 | Committed the working tree as it was and tagged it | `7afd1b0`, tag `report-june2026` (`.job` files and `generate_data.sh` force-added; data, checkpoints and ICs stay ignored) | 35 files | tree preserved.
+  - 2026-11-14 | Restructured the repository | git mv for tracked files, mv for ignored data; `grackle_pinn.train` now takes `--config` and writes to `results/runs/<run>/` | root 11 entries | done.
+  - 2026-11-14 | Deleted regenerable output | `Plots/`, both `Plots_Subfolder/`, `__pycache__/`, empty `.err` files, `EnvPablo/` | about 14 GB freed | allowed by section 2.
+  - 2026-11-14 | Fixed-batch regression check | seed 0, 4096 pairs from `Train_Fam_3.dat`, 12 x 512 model, weight 20 | data loss 34.415265596337576, mass loss 1.1717976320327076e-04, identical to the last digit before and after the move | structure change is behaviour-neutral.
+  - 2026-11-14 | New environment `~/venvs/grackle-pinn` | Python 3.9.10, `requirements.txt`, torch 2.8.0+cu128 | imports and runs | `EnvPablo/` removed.
+  - 2026-11-14 | GPU smoke test of the moved training code | job 3252156, account `cs-302`, QOS `debug` (fair-share 0.318 of 0.318, 0.293, 0.180, 0.024), 3 epochs on `Train_Fam_3.dat` | completed in 57 s, losses falling (data 6.16e2 to 6.08e2) | OK.
+  - 2026-11-14 | The login node was heavily loaded by other users (load average 35), so CPU smoke tests ran slowly | none | none.
+
 
 ### A2. Evaluation harness and numeric baseline `[-]`
 - Goal: a single `evaluate.py` that turns any checkpoint into a table of numbers, and reference numbers to compare against.
@@ -401,7 +416,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 ## 8. Run registry
 
 ### 8.1 Legacy runs, June 2026 (identity uncertain, see section 2)
-- Files in `ResultsToDownload/` (to become `results/legacy/` in A1): last and `BEST` checkpoint, scaling file, loss history and log per run. None has been scored yet (A2).
+- Files in `ResultsToDownload/` (now `results/legacy/`): last and `BEST` checkpoint, scaling file, loss history and log per run. None has been scored yet (A2).
 - `1` | 25.0M training points | 1,600 epochs, 32.8 h, completed | best one-step validation MSE 1.98e-3 at epoch 681 | about 72 s per epoch.
 - `noClamp_Long` | 2.1M points | 6,500 epochs, 10.3 h (19 to 20 May) | no validation column | log shows a 256 x 8 era; final printed MSE 1.7e-5.
 - `modelB` | 150 epochs | best validation MSE 1.15e-1 at epoch 146.

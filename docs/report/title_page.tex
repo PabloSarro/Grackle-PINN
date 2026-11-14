@@ -1,0 +1,50 @@
+% TITLE PAGE like the one moodle (that was a Word doc)
+% to be included in the main just after \begindocument 
+% with \input (simpler) or \include (does clearpage before and after, better for "independent" sections)
+
+\thispagestyle{empty}   % hides the number on the title page (hides footer and header)
+\newgeometry{margin=2.5cm, top=3.5cm, bottom=3.5cm}
+% blue color in the template word doc : HEX #1F497D
+\definecolor{philo_blue}{HTML}{1F497D}
+
+% Top Block ------------------------------------------------------------------
+\begin{center}
+    {\color{philo_blue}        
+        \LARGE \textbf{\textsc{Speeding Up Galaxy Cluster Evolution Simulations with Physics-Informed Neural Networks}}
+        
+        \vspace{1cm}
+        % last name, first name and department of the authors
+        {\large\textbf{
+            Pablo Sarró Sánchez, CSE
+        }}
+    }
+\end{center}
+ 
+\vfill
+% Middle Block ---------------------------------------------------------------
+\begin{center}
+    %\includegraphics[width=0.4\textwidth]{frog.jpg}
+    %\vspace{1cm}
+    \large
+        Semester Project \nth{1} year master\\[0.6em] 
+        Supervised by\\[0.6em]
+        {\color{philo_blue}
+        \textit{David Richard Harvey, Philosophy of Science}}\\[1.5em]
+        Report submitted on June 8th, 2026
+\end{center}
+
+\vfill
+% Bottom Block ---------------------------------------------------------------
+\begin{center}
+    \begin{minipage}{\textwidth}
+        \centering
+        {\large Lausanne, academic year 2025--2026}\\[1.5cm]
+        
+        % EPFL pdf logo
+        \includegraphics[width=0.2\textwidth]{EPFL_logo.pdf}
+    \end{minipage}
+\end{center}
+
+\restoregeometry
+
+\setcounter{page}{1}    % restart numbering at 1 for the next page

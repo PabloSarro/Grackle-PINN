@@ -1,60 +1,44 @@
-## 🚀 Execution Guide: Grackle-PINN Emulation
+# Grackle-PINN
 
-This project implements a **Physics-Informed Neural Network (PINN)** to emulate the Grackle chemistry and cooling library. The model solves stiff coupled ODEs for Temperature ($T$), Neutral Hydrogen ($HI$), and Ionized Hydrogen ($HII$).
+Neural emulator of the Grackle hydrogen chemistry and cooling network (PINN-style MLP predicting log-increments of T, nHI, nHII over one 100-yr step). Work plan, decisions and results log: [`TASKS.md`](TASKS.md). The June 2026 state behind the report is tagged `report-june2026`.
 
+## Layout
 
-### 1. Initial Setup
+| Path | Content |
+| :-- | :-- |
+| `grackle_pinn/` | package: `model.py`, `data_utils.py`, `physics.py`, `metrics.py`, `train.py` |
+| `configs/` | one JSON file per training run |
+| `scripts/datagen/` | Grackle driver (`.c`), IC generators, ground-truth generation; `families/` holds the family grid and kNN balancing |
+| `scripts/datasets/` | dataset selection, splitting and filtering scripts |
+| `scripts/plots/` | plotting scripts |
+| `jobs/` | Slurm job files |
+| `docs/` | `report/` (LaTeX source of the June report), `Plots_Report/` |
+| `data/`, `results/`, `archive/` | git-ignored: datasets and IC lists, run outputs (`results/legacy/` = June runs), old files |
 
-```bash
-pip install -r requirements.txt
-mkdir -p logs GrackleData
-```
+## Setup
 
-
-### 2. Data Generation (Pre-requisite)
-Before training the neural network, you must generate the Ground Truth (GT) dataset using the Grackle library. To do so:
-
-**2.1. Create Initial Conditions:**
-Run:
-```bash
-python params.py
-```
-
-**2.2. Generate Ground Truth Simulations for all ICs:**
-Run:
-```bash
-sbatch generate_data.sh
-```
-
-
-### 3. Model Training
-Training is designed to run on a GPU-enabled cluster using SLURM. 
-
-| Script | Purpose |
-| :--- | :--- |
-| `data_utils.py` | Handles $\log_{10}$ space conversion and unified IC-target normalization. |
-| `model.py` | Defines the MLP/ResNet architecture with the **Initial Condition (IC) Anchor**. |
-| `physics.py` | Implements the Analytical Grackle rates and Physics Loss residuals. |
-| `train.py` | Main optimization loop using Adam and Gradient Clipping. |
-
-**To launch on the Izar Cluster:**
-```bash
-sbatch train.job
-```
-
-### 4. Monitoring Progress
-While the job is running, you can monitor the training dynamics through the generated SLURM logs:
-
-* **Check status:** `squeue -u <your_gaspar_id>`
-* **Live logs:** `tail -f train_<job_id>.log`
-* **Checkpoints:** The model automatically saves `scaling_params_PINN.pth` (normalization boundaries) and intermediate checkpoints every 5 epochs.
-
-### 5. Evaluation and Visualization
-Once the model is trained, use the visualization script to compare the PINN predictions against the Grackle Ground Truth on a logarithmic scale.
+The virtual environment lives outside the repository:
 
 ```bash
-python visualise.py
+python3 -m venv ~/venvs/grackle-pinn
+~/venvs/grackle-pinn/bin/pip install -r requirements.txt
 ```
-*This will generate `pinn_performance.png`, showcasing the model’s ability to capture non-linear chemical and thermal dynamics.*
 
----
+## Data generation
+
+The Grackle driver `scripts/datagen/cooling-full-integration-100yr.c` is built against the Grackle install of the `Lessandre` project (see `TASKS.md`, task A3, which also rebuilds the datasets). Initial conditions: `python scripts/datagen/params.py`, then `sbatch scripts/datagen/generate_data.sh`.
+
+## Training
+
+Choose the Slurm account and QOS as described in `TASKS.md` section 3.2, then:
+
+```bash
+sbatch --account=<acc> --qos=<qos> --export=ALL,CONFIG=configs/<run>.json jobs/train.job
+# resume: add RESUME=results/runs/<run>/PINN_<run>.pth to --export
+```
+
+Run outputs (checkpoints, scaling file, loss history, copy of the config) go to `results/runs/<run_name>/`; Slurm logs to `results/logs/`. Locally: `python -m grackle_pinn.train --config configs/<run>.json` from the repository root.
+
+## Evaluation
+
+The evaluation harness (`grackle_pinn/evaluate.py`, free rollout from the initial condition only) is task A2 and does not exist yet. The old `visualise.py` and `ComputeMSE.py` are in `archive/`.

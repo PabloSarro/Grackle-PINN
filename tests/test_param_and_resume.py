@@ -5,7 +5,7 @@ import json, os, subprocess, sys, tempfile
 import numpy as np, torch
 
 sys.path.insert(0, os.getcwd())
-from grackle_pinn.param import Constrained, Report
+from grackle_pinn.param import Constrained, Report, LogRate
 from grackle_pinn.model import PINN
 
 torch.set_default_dtype(torch.float64)
@@ -51,6 +51,28 @@ def test_hard_constraints_for_any_network():
     assert worst_mass < 1e-13 and e_up == 0
 
 
+def test_lograte():
+    c = LogRate()
+    cur, nxt = torch.from_numpy(z[:, :-1].reshape(-1, 3)), torch.from_numpy(z[:, 1:].reshape(-1, 3))
+    t = c.targets(cur, nxt)
+    sc = {"in_mean": torch.zeros(3), "in_std": torch.ones(3), "tg_mean": torch.zeros(2), "tg_std": torch.ones(2)}
+    rec = c.advance(cur, c.to_physical(t / (1 + 1e-8), sc))   # inverse of the target transform (the loader divides by std + 1e-8)
+    err = (rec - nxt).abs().max().item()
+    print("lograte: advance(inverse(targets)) vs next state, max |d ln|", err,
+          "| target ranges", t.min(0).values.tolist(), t.max(0).values.tolist()); assert err < 1e-9
+    m = PINN(3, 2, hidden_dim=32, hidden_layers=2)
+    s = ls.clone(); e0 = torch.exp(c.to_z(s)[:, 0]); nH0 = torch.exp(s[:, 1]) + torch.exp(s[:, 2])
+    worst, up = 0.0, 0
+    for _ in range(50):
+        for p in m.parameters():
+            p.data = torch.randn_like(p) * 3
+        s2 = c.step(m, sc, s)
+        assert torch.isfinite(s2).all()
+        worst = max(worst, (torch.exp(s2[:, 1]) + torch.exp(s2[:, 2]) - nH0).abs().div(nH0).max().item())
+        up += int((torch.exp(c.to_z(s2)[:, 0]) > e0 * (1 + 1e-12)).sum())
+    print("lograte: worst mass violation", worst, "energy increases", up); assert worst < 1e-13 and up == 0
+
+
 def test_report_unchanged():
     r = Report()
     cur, nxt = torch.from_numpy(z[:, :-1].reshape(-1, 3)), torch.from_numpy(z[:, 1:].reshape(-1, 3))
@@ -62,7 +84,7 @@ def test_resume_reproduces_uninterrupted():
         base = dict(train_path="data/datasets/report8.npz", valid_path="data/datasets/report8.npz", out_dir=d,
                     hidden_dim=32, hidden_layers=2, epochs=6, check_every=2, batch_size=8192, seed=3,
                     rollout_trajectories=4, rollout_window=100, rollout_starts=[0, 1000], weight_factor=20.0)
-        for param in ("report", "constrained"):
+        for param in ("report", "constrained", "lograte"):
             ws = {}
             for tag, stop in (("full", None), ("part", 3)):
                 cfg = dict(base, run_name=f"{param}_{tag}", parameterisation=param, stop_after_epochs=stop)

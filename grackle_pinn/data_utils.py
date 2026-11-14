@@ -46,6 +46,8 @@ class GrackleDataset(Dataset):
         self.all_targets = torch.cat(targets).to(torch.get_default_dtype())
 
         self.target_absmax = self.all_targets.abs().max(dim=0).values
+        self.target_min = self.all_targets.min(dim=0).values
+        self.target_max = self.all_targets.max(dim=0).values
 
         print("Pre-normalising inputs and targets...")
         # If parameters are not provided, compute them (done for the Training set)

@@ -82,6 +82,11 @@ def main():
         param = build_param({"name": "constrained", "lmax": 1.25 * float(train_set.target_absmax[1])})
         train_set = GrackleDataset(cfg["train_path"], param=param)   # same data, only the bound changes
         print(f"constrained: |d logit x| <= {param.lmax:.3f}", flush=True)
+    if param.name == "lograte" and ckpt is None:
+        m = 2.0   # nats of margin beyond the training range for the clip used in rollouts
+        param = build_param({"name": "lograte", "lo": (train_set.target_min - m).tolist(), "hi": (train_set.target_max + m).tolist()})
+        train_set = GrackleDataset(cfg["train_path"], param=param)
+        print(f"lograte: clip range lo {param.lo} hi {param.hi}", flush=True)
     sc_cpu = {"in_mean": train_set.in_mean, "in_std": train_set.in_std, "tg_mean": train_set.tg_mean, "tg_std": train_set.tg_std}
     if ckpt is not None and "scaling" in ckpt:
         sc_cpu = ckpt["scaling"]

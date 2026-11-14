@@ -37,7 +37,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - `[~]` A2 Evaluation harness and numeric baseline
   - `[X]` A3 Clean ground-truth generation and dataset rebuild
   - `[~]` A4 State variables with built-in constraints
-  - `[-]` A5 Target and loss that resolve the flat regime
+  - `[~]` A5 Target and loss that resolve the flat regime
   - `[X]` A6 Training-loop fixes
 - Larger experiments
   - `[-]` B3 Physics-informed terms: which ones help (central study)
@@ -49,7 +49,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - `[-]` B7 Training-set sampling strategies
 - Deliverable
   - `[-]` C1 Updated report
-- Next step: wait for `REF-A`, `REF-B` and `A4-C-B`, then score them (A2, A4); the two reference runs `REF-A`, `REF-B` (finish A2), then A4 (after Pablo's go-ahead). A1 is done apart from its listed deviations.
+- Next step: wait for `REF-A`, `REF-B`, `A4-C-B` and `A5-L-B`, then score them (A2, A4); the two reference runs `REF-A`, `REF-B` (finish A2), then A4 (after Pablo's go-ahead). A1 is done apart from its listed deviations.
 
 ## 1. Baseline: what the report states
 
@@ -304,16 +304,20 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - 2026-11-14 | Submitted `A4-C-B` (constrained parameterisation, REF-B data and settings, 800 epochs) | job 3252249, account `env540`, QOS `normal` (`cs-302` and `math-454` slots hold REF-A/B) | running | -.
 
 
-### A5. Target and loss that resolve the flat regime `[-]`
+### A5. Target and loss that resolve the flat regime `[~]`
 - Goal: test the diagnosis of R3 on the fixed-100-yr model, changing only target and loss.
 - Why: Figs. 3 bottom, 4, 7, 8, 9. Most direct comparison with the report: same data, same network.
 - Steps:
-  - `[-]` Target: ln of the rate magnitude (e.g. ln(-d ln e / dt), sign fixed by A4) instead of the raw increment; for x, a signed-log or asinh transform.
-  - `[-]` Loss: plain MSE in that space; drop the `1 + 20|y|` weight.
-  - `[-]` Train on the balanced dataset first (where the report saw the worst drift), then the stratified one.
+  - `[X]` Target: ln of the rate magnitude (u1 = ln(-d ln e), sign fixed by A4) instead of the raw increment; for x, u2 = asinh(d logit x / s) with s = 1e-10. Implemented as parameterisation `lograte` (`grackle_pinn/param.py`) on top of the A4 state, so mass and energy guarantees are kept.
+  - `[X]` Loss: plain MSE in that space (`weight_factor` 0).
+  - `[~]` Train on the balanced dataset first (where the report saw the worst drift), then the stratified one: `A5-L-B` is running; `A5-L-A` (REF-A data) to be submitted after.
 - Effort: 1 to 2 days plus two training runs of 12 to 24 GPU-hours.
 - Success (provisional until A2 gives numbers): Families 0 to 2 final error in T under 0.02 dex at 2.5 Myr (report: 0.07 dex to tens of dex); Family 3 cliff time within 2% (report Fig. 6: about 7%); no regression on the Family 3 case of Fig. 5.
-- Log: none yet.
+- Implementation: the network outputs two numbers, standardised in (u1, u2) space. Rollouts invert the transform (d ln e = -exp(u1), d logit x = s sinh(u2)) with u clipped to the training range plus 2 nats, so the update stays finite for any output. The ranges in the training data are u1 in [-20.5, -0.9] (increments 1.3e-9 to 0.4 in ln e) and u2 in [-24.2, 26.6] **[measured, report8 data]**.
+- Log:
+  - 2026-11-14 | Unit tests (`tests/test_param_and_resume.py`, job 3252306) | report8 data, 50 wild networks | inverse of the target transform reproduces the next state to 2.8e-14; worst mass violation 1.9e-15; 0 energy increases; resumed run equals uninterrupted run (weight difference 0.0) | `lograte` is correct and resumable.
+  - 2026-11-14 | Submitted `A5-L-B` (lograte, REF-B data, weight factor 0, otherwise identical to `A4-C-B`) | job 3252307, account `env540`, QOS `normal` (`cs-302` and `math-454` slots hold REF-A/B) | running | -.
+
 
 ### A6. Training-loop fixes `[X]`
 - Goal: runs that finish what they are configured to do and select the right checkpoint.
@@ -473,6 +477,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 - `REF-B` | 2026-11-14 | A2 | `refB_train.npz` (20.0M pairs, 800 files), valid `refB_valid.npz` (200) | `configs/refB.json`, same as REF-A | account `math-454`, QOS `math-454`, fair-share 0.180, job 3252217 | running (started 17:38) | - | -
 - `bench64`, `bench32`, `constrained_smoke` | 2026-11-14 | A6/A4 | `refA_train` (first two), `refB_train` (last) | 3, 3 and 6 epochs, speed and smoke tests | `env540`, QOS `debug`, job 3252240 | finished | see A6/A4 logs | not models.
 - `A4-C-B` | 2026-11-14 | A4 | `refB_train.npz`, valid `refB_valid.npz` | `configs/A4-C-B.json`: constrained parameterisation, 12 x 512, float64, weight factor 20, 800 epochs, selection on free-rollout windows | account `env540`, QOS `normal`, fair-share 0.325, job 3252249 | running (started 18:58) | - | -
+- `A5-L-B` | 2026-11-14 | A5 | `refB_train.npz`, valid `refB_valid.npz` | `configs/A5-L-B.json`: lograte parameterisation, plain MSE, 12 x 512, float64, 800 epochs, selection on free-rollout windows | account `env540`, QOS `normal`, fair-share 0.294, job 3252307 | running | - | -
 - Configuration choice: the report's nominal 10,000 epochs would again leave the mass-loss ramp under 10% of its maximum (R2); 900 epochs fit the 24 h wall time (June: 72 to 89 s per epoch), so the ramp reaches its full 1e7. This is the only deviation from the report configuration. The checkpoints keep being chosen on one-step validation MSE until A6.
 
 ## 9. Open questions

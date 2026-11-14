@@ -19,6 +19,8 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - add the metrics table row to `results/baseline.md` once A2 exists.
 - Log line format: `YYYY-MM-DD | what was tried | config / commit / run id | result with numbers | decision taken`.
 - Never delete a log line. If a result is later found wrong, add a new line that says so.
+- Evaluation rule (from Pablo's supervisor): at inference the model may only use the initial condition and its own previous predictions. Every headline number comes from such a free rollout. Numbers obtained by feeding ground-truth states (teacher-forced one-step errors) are diagnostics only and must be labelled as such. The same holds for checkpoint selection.
+- The physics-informed part is central to the project: every model that is presented as a result carries at least one explicit physics term, and its contribution is measured by ablation (task B3).
 - Evidence labels: **[measured]** a check was run and the number is reported; **[read]** taken from code, logs or the report; **[inferred]** interpretation, to be confirmed by the task that tests it.
 
 ### 0.3 Status at a glance
@@ -29,21 +31,23 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - `[X]` R4 Test the density-time scaling
   - `[X]` R5 Test the analytic rates against the data
   - `[X]` R6 Review `../../Lessandre` and `../../OldFiles`
-  - `[X]` R7 Check cluster accounts
+  - `[X]` R7 Check cluster accounts (jed, then Izar)
 - Quick wins
   - `[-]` A1 Simplify the repository structure
   - `[-]` A2 Evaluation harness and numeric baseline
-  - `[-]` A3 Clean ground-truth generation
+  - `[-]` A3 Clean ground-truth generation and dataset rebuild
   - `[-]` A4 State variables with built-in constraints
   - `[-]` A5 Target and loss that resolve the flat regime
   - `[-]` A6 Training-loop fixes
 - Larger experiments
+  - `[-]` B3 Physics-informed terms: which ones help (central study)
   - `[-]` B1 Flow map with scaled time as input
   - `[-]` B2 Rollout-aware training
-  - `[-]` B3 Physics-informed terms that respect stiffness
   - `[-]` B4 Reference baselines and speed
   - `[-]` B5 Report future-work items, re-assessed
   - `[-]` B6 Scope extensions
+- Deliverable
+  - `[-]` C1 Updated report
 - Next task to start: **A1** (not started; waiting for Pablo's go-ahead).
 
 ## 1. Baseline: what the report states
@@ -65,40 +69,52 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 
 ## 2. Decisions taken
 
-- 2026-11-14 | Cluster account (Q1): before every job submission, compare the four accounts and use the one with the best queue position. Procedure in section 3.
-- 2026-11-14 | Model identity (Q2): the June checkpoints in `ResultsToDownload/` cannot be trusted to be the report's Model A and B (Pablo: models were mixed up at the time). Consequences:
+- 2026-11-14 | Cluster account: before every job submission, compare the four accounts and use the one with the best queue position. Procedure in section 3.
+- 2026-11-14 | Model identity: the June checkpoints in `ResultsToDownload/` cannot be trusted to be the report's Model A and B (Pablo: models were mixed up at the time). Consequences:
   - no attempt to map checkpoints to the report;
   - comparison against the report uses the report's own figures (section 1.2) as "Model A / Model B as reported";
   - numeric baselines come from new reference runs with known provenance (task A2, runs `REF-A`, `REF-B`);
   - the June checkpoints are scored once as "legacy, identity uncertain" and never presented as Model A or B.
-- 2026-11-14 | Clean-up (Q7): regenerable or unnecessary files may be deleted and `EnvPablo/` taken out of the repository. Applies to task A1.
+- 2026-11-14 | Clean-up: regenerable or unnecessary files may be deleted and `EnvPablo/` taken out of the repository. Applies to task A1.
 - 2026-11-14 | This file is the single detailed record of done and to-do work (section 0.2).
+- 2026-11-14 | Deliverable: an updated report. No deadline. Task C1.
+- 2026-11-14 | The physics-informed part is central and must remain in one form or another. Different ways of imposing physics are to be analysed and tested alone, in pairs, in triples and so on, to measure how much each helps. Task B3, moved ahead of B1.
+- 2026-11-14 | The 100-yr step is not a requirement: the step may be fixed or fully dynamic (for example tied to stiffness). Tasks A5 (fixed step) and B1 (variable step) both stay.
+- 2026-11-14 | Inference must depend only on previously predicted information, never on ground-truth states. Rule added to section 0.2; applies to A2 metrics, checkpoint selection (A6) and multi-jump evaluation (B1).
+- 2026-11-14 | The lost multi-file `visualise.py` is not available elsewhere. The remaining `visualise.py` may be removed and rebuilt (A1, A2).
+- 2026-11-14 | The Grackle driver may be changed (A3).
+- 2026-11-14 | Whether `Active_Files/` was used for a report model is not remembered. It is kept as extra data and not used for any reference run.
+- 2026-11-14 | Work runs on Izar, from a session on its login node. The June scratch data is gone; all datasets are regenerated from the IC lists and the report's description (A3). The variance-stratified selection is re-implemented (A3).
+- 2026-11-14 | Order of scope extensions left to my judgement: helium and UV background first, SWIFT coupling second. Reason: the updated report gains more from showing the method on a less simplified network than from the coupling engineering; inference speed is already covered by B4.
 
 ## 3. Cluster accounts and job submission
 
-### 3.1 What exists
-- **[measured, 2026-11-14, on `jed2`]** Four Slurm accounts for user `sarro` on cluster `jed`:
-  - `cs-302`: QOS `academic`, `cs-302` (default `cs-302`), max wall 1 day on the association
-  - `env540`: QOS `academic`, max wall 1 day
-  - `math-454`: QOS `math-454`, max wall 1 day
-  - `master`: QOS `academic`, max wall 3 days
-- **[measured]** QOS on jed: `cs-302` priority 10000 but max wall 3 h and 5 submitted jobs per user; `math-454` priority 5000; `academic` priority 0, 1,152 CPUs per user.
-- **[measured]** Fair-share snapshot on jed (higher is better): `env540` 0.991, `cs-302` 0.728, `math-454` 0.670, `master` 0.451. Raw usage is 0 on all but `math-454` (6).
-- **[measured]** `jed` has no GPU partition (partitions: `standard`, `bigmem`, `hugemem`, `academic`, `infiniband`). The June training ran on `izar` (`--partition=gpu`). Only jed's accounting is visible from jed; the GPU cluster keeps its own associations and fair-share.
-- **[inferred]** `/home` is shared between clusters: a June training log written on a GPU node shows the same `/home/sarro/SemProj/...` path.
+### 3.1 What exists on Izar (where all jobs run)
+- **[measured, 2026-11-14, on `izar1`]** Four Slurm accounts for user `sarro`:
+  - `cs-302`: QOS `cs-302` (default), `debug`, `normal`; max wall 1 day
+  - `env540`: QOS `normal` (default), `build`, `debug`; max wall 1 day
+  - `math-454`: QOS `normal` (default), `math-454`, `debug`; max wall 1 day
+  - `master`: QOS `normal` (default), `build`, `debug`, `long`; max wall 3 days
+- **[measured]** QOS priorities: `debug` 50000 (max 1 h, 5 jobs), `cs-302` 10000 (5 jobs), `math-454` 10000 (5 jobs), `normal` 1000 (16 GPUs per user), `long` 100 (7 days).
+- **[measured]** Fair-share snapshot (higher is better): `cs-302` 0.318, `env540` 0.293, `math-454` 0.180, `master` 0.024.
+- **[measured]** Partitions: `gpu` (default; 69 nodes with 2 V100, 2 nodes with 4), `gpu-xl`, `test`. Login node has 40 cores and no GPU.
+- **[measured]** `/scratch/izar/sarro` exists and is empty. `/home` is shared with jed (same repository path).
+- **[measured]** `EnvPablo` imports torch 2.8.0+cu128; the Grackle driver binary links on Izar.
+- On jed (CPU only) the same four accounts exist with different QOS and fair-share; not used unless a large CPU-only job needs it.
 
 ### 3.2 Procedure before every job submission
-- Run on the cluster where the job will be submitted:
+- Run:
   - `sacctmgr -P show assoc user=$USER format=cluster,account,partition,qos,defaultqos,maxwall`
   - `sshare -U -u $USER -o Account,RawUsage,EffectvUsage,FairShare`
   - `sacctmgr -P show qos format=name,priority,maxwall,maxtrespu,maxsubmitpu`
-- Keep only the account/QOS pairs that allow the job (partition, GPU, requested wall time, job-count limits).
-- Among those, pick the highest QOS priority, then the highest `FairShare` (equivalently the lowest usage).
+- Keep only the account/QOS pairs that allow the job (wall time, GPU count, job-count limits).
+- Among those, pick the highest QOS priority, then the highest `FairShare` (the account with the least recent usage relative to its share).
 - Write the chosen account, QOS and the fair-share values in the run registry entry (section 8).
-- With today's jed numbers: a job under 3 h goes to `cs-302` with QOS `cs-302`; a longer one to `env540` with QOS `academic`.
+- With today's numbers: smoke tests under 1 h use QOS `debug`; training up to 24 h uses account `cs-302` with QOS `cs-302` (at most 5 jobs at once); a sixth simultaneous job or anything over 24 h falls back to `normal` on the best remaining account (`master` for more than 1 day).
 
-### 3.3 Not settled
-- Which GPU cluster to use and how to reach it from a session (see Q11).
+### 3.3 Storage
+- Scratch is purged without notice (the June datasets disappeared). Anything that cannot be regenerated by a script in git must live under `/home`.
+- Raw trajectories go to `/scratch/izar/sarro/`; the IC lists, the generation scripts and the compact training arrays of the selected datasets stay under `/home` (A3).
 
 ## 4. Completed review steps and their outcomes
 
@@ -170,7 +186,8 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 ### R7. Check cluster accounts `[X]`
 - Outcome: section 3.
 - Log:
-  - 2026-11-14 | `sacctmgr`, `sshare`, `sinfo`, QOS table | on `jed2` | 4 accounts, fair-share snapshot, no GPU partition on jed | procedure 3.2 fixed; Q11 opened for the GPU cluster.
+  - 2026-11-14 | `sacctmgr`, `sshare`, `sinfo`, QOS table | on `jed2` | 4 accounts, no GPU partition on jed | procedure drafted; GPU cluster question opened.
+  - 2026-11-14 | Same checks repeated | on `izar1` | 4 accounts with different QOS; `cs-302` best today (QOS priority 10000, fair-share 0.318); scratch folder empty | section 3 rewritten for Izar; GPU cluster question closed.
 
 ## 5. Tasks: quick wins
 
@@ -180,10 +197,11 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 - Steps:
   - `[-]` Commit the current working tree as it is and tag it `report-june2026`.
   - `[-]` Move code to: `grackle_pinn/` (`model.py`, `data_utils.py`, `physics.py`, one `train.py` replacing `train.py` + `train_modelB.py`, `evaluate.py`), `configs/` (one file per experiment), `scripts/datagen/` (`create_Grackle/*`, `Families/*.py`), `scripts/datasets/` (`active.py`, `split.py`, `extract_fam3.py`, `extract_plot_files.py`, `filter_dataset.py`), `scripts/plots/` (the six `plot_*.py` merged into one CLI), `jobs/`, `docs/` (report PDF, `Plots_Report/`).
-  - `[-]` Move data to `data/` and June outputs to `results/legacy/<run>/` (both git-ignored).
+  - `[-]` Move data to `data/` (including `Active_Files/`, kept as extra data) and June outputs to `results/legacy/<run>/` (both git-ignored).
   - `[-]` Move to `archive/`: `helpers/`, loose root files (`ac_traj.dat`, `eq_traj.dat`, `output_1.dat`, `*_analysis.png`), `Eval_Performance/`, `Family3_Files/`.
   - `[-]` Delete (allowed, section 2): `Plots/`, `Active_Files/Plots_Subfolder/`, `Families/Grid_Files/Plots_Subfolder/`, `__pycache__/`, empty `.err` files.
-  - `[-]` Virtual environment: recreate outside the repo from `requirements.txt` and delete `EnvPablo/` (a venv cannot simply be moved, its scripts contain absolute paths). Check first that the new one imports torch and runs one batch.
+  - `[-]` Virtual environment: recreate outside the repo from `requirements.txt` and delete `EnvPablo/` (a venv cannot simply be moved, its scripts contain absolute paths). Check first that the new one imports torch and runs one batch on a GPU node (QOS `debug`).
+  - `[-]` Remove the stale `visualise.py` and `ComputeMSE.py` once their useful parts are in `evaluate.py` (A2); until then keep them under `archive/`.
   - `[-]` `.gitignore`: stop ignoring `*.job`, `*.sh` and the IC lists.
   - `[-]` Rewrite `README.md` (it references `generate_data.sh` at the root and `pinn_performance.png`, which do not exist).
 - Effort: 0.5 to 1 day.
@@ -194,41 +212,45 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 - Goal: a single `evaluate.py` that turns any checkpoint into a table of numbers, and reference numbers to compare against.
 - Why: section 1.2 and R2. The report has figures only, so "improved" cannot be measured yet. Per section 2, the June checkpoints are not accepted as Model A and B.
 - Steps:
-  - `[-]` Rollout in float64, batched over trajectories; architecture and scaling read from the checkpoint (stored there from now on).
-  - `[-]` Metrics per family and overall: rollout error |d log10| for T, nHI, nHII (median, 95th percentile over time, value at 2.5 Myr); cliff-time error (time of steepest d ln T); mass-conservation violation max |ln(nH_pred / nH_0)|; one-step error binned by decade of the true increment; count of unphysical outputs (T below 1 K, energy increasing).
-  - `[-]` Fixed evaluation sets: the 8 `Plot_Files` trajectories and a per-family set regenerated from `Families/ICs_valid.txt` (200 ICs).
+  - `[-]` Free rollout in float64 from the initial condition only, batched over trajectories; architecture and scaling read from the checkpoint (stored there from now on). This replaces the lost multi-file `visualise.py`.
+  - `[-]` Headline metrics (free rollout), per family and overall: error |d log10| for T, nHI, nHII (median, 95th percentile over time, value at 2.5 Myr); cliff-time error (time of steepest d ln T); mass-conservation violation max |ln(nH_pred / nH_0)|; count of unphysical outputs (T below 1 K, energy increasing).
+  - `[-]` Diagnostics (teacher-forced, labelled as such, never used as a result): one-step error binned by decade of the true increment.
+  - `[-]` Fixed evaluation sets: the 8 report-figure initial conditions and a per-family set from `Families/ICs_valid.txt` (200 ICs), all regenerated in A3.
   - `[-]` "As reported" row: numbers read off the report figures (section 1.2), labelled as such.
   - `[-]` Legacy checkpoints: score all seven runs in `results/legacy/` once, labelled "legacy, identity uncertain". Also once in float32 to quantify the precision effect found in R2.
-  - `[-]` Reference runs with known provenance, report configuration (12 x 512, loss weight 20, soft mass loss), trained through the cleaned pipeline:
-    - `REF-B`: kNN-balanced dataset regenerated from `Families/ICs_train.txt` and `ICs_valid.txt` (exactly reproducible).
-    - `REF-A`: variance-stratified dataset; needs the 15,000 trajectories of `params.txt` and the 800/250/250 selection, whose script is not in the repo (Q12).
+  - `[-]` Reference runs with known provenance, report configuration (12 x 512, loss weight 20, soft mass loss ramp), trained through the cleaned pipeline on the data rebuilt in A3:
+    - `REF-B`: kNN-balanced dataset from `Families/ICs_train.txt` and `ICs_valid.txt`.
+    - `REF-A`: variance-stratified dataset, selection re-implemented from the report (A3).
   - `[-]` Write `results/baseline.md` with the table; regenerate the layout of Figs. 3 to 9 from the same script.
-- Effort: 1 to 2 days for the harness (CPU); reference runs 24 GPU-hours each.
+- Order: harness first (CPU), then A3, then the two reference runs.
+- Effort: 1 to 2 days for the harness; reference runs 24 GPU-hours each.
 - Success: baseline table committed with rows "as reported", legacy, `REF-A`, `REF-B`; every later task reports the same columns next to it.
 - Log: none yet.
 
-### A3. Clean ground-truth generation `[-]`
-- Goal: trajectories whose rows are exactly 100 yr apart, integrated the same way at all times, stored at full precision in a fast format.
-- Why: R3. Timing jitter up to about 40% at the cliff bounds how well any fixed-step model can fit the cliff (Fig. 6 timing error).
+### A3. Clean ground-truth generation and dataset rebuild `[-]`
+- Goal: all datasets regenerated (the June scratch copies are gone), with rows exactly 100 yr apart, one integration scheme at all times, full precision and a fast format.
+- Why: R3. Timing jitter up to about 40% at the cliff bounds how well any fixed-step model can fit the cliff (Fig. 6 timing error). Regeneration is needed in any case.
 - Steps:
-  - `[-]` Driver: clip the last sub-step to land exactly on each output time; drop the 0.5 Myr switch; write the true interval in the `dt` column; print time at full precision; write internal energy and x directly.
-  - `[-]` Convert trajectories once to `.npy`/`.npz` (float64) and load those in training.
-  - `[-]` Regenerate the datasets from the existing IC lists (`params*.txt`, `Families/ICs_*.txt`). The existing binary links and runs on jed; 1,000 trajectories took under an hour on 16 cores in May.
-  - `[-]` Regenerate the 8 evaluation trajectories; report A2 numbers on old and new truth.
-- Effort: 1 day plus 1 to 2 h of CPU jobs.
-- Success: all row intervals equal 100 yr to 1e-6 yr; dataset load time from minutes to seconds; A2 table recomputed on the new truth.
-- Open point: A2's reference runs should train on the regenerated data, so A3 may have to run before the `REF` runs of A2. Decide when starting A2.
+  - `[-]` Driver (change allowed, section 2): clip the last sub-step to land exactly on each output time; drop the 0.5 Myr switch; write the true interval in the `dt` column; print time at full precision; write internal energy and x directly. Rebuild against `../../Lessandre/grackle-install`.
+  - `[-]` Check the new driver against the old one on the 8 report-figure ICs (differences expected only near the cliff and at the 1e-3 level elsewhere).
+  - `[-]` Generate on scratch: the 5,625-point family grid (the IC list in the repo has only 507 lines, so the full grid is rebuilt from Table 3 of the report), the 1,000 balanced ICs (`Families/ICs_train.txt`, `ICs_valid.txt`), the 15,000 random ICs (`create_Grackle/params.txt`), the 8 report-figure ICs.
+  - `[-]` Re-implement the variance-stratified selection from the report (score each file by the summed log-space variance of its increments; 800 most active, 250 moderate, 250 flat; split 700/150/150 train and 100/100/100 validation). The exact June boundaries between "moderate" and "flat" are not recorded, so the choice made is written in the Log.
+  - `[-]` Re-run the family clustering and kNN oracle on the new grid only if the balanced IC lists need to change; otherwise reuse `Trajectory_Families.csv`.
+  - `[-]` Convert selected datasets to `.npz` (float64) under `/home` (section 3.3) and load those in training.
+- Effort: 1 to 2 days plus CPU jobs (May: 1,000 trajectories in under an hour on 16 cores, so about 22,600 trajectories need roughly 10 to 25 node-hours).
+- Success: all row intervals equal 100 yr to 1e-6 yr; dataset load time from minutes to seconds; datasets for `REF-A` and `REF-B` have the point counts of the report (25.0M and 20.0M) to within 1%.
 - Log: none yet.
 
 ### A4. State variables with built-in constraints `[-]`
-- Goal: the network predicts in (internal energy, ionised fraction x) with nH carried through unchanged.
+- Goal: the network predicts in (internal energy, ionised fraction x) with nH carried through unchanged, as one of the ways of imposing physics.
 - Why: R3 and Fig. 3 bottom. Mass conservation becomes exact instead of a penalty with a weight to tune; energy can be forced non-increasing, which removes outputs like Fig. 4 bottom (T rising 20x) and bounds x to [0, 1].
+- Position in the project: this is physics imposed through the architecture ("hard" constraint). It does not replace the explicit physics losses, which stay mandatory (section 0.2); B3 compares hard, soft and combined variants.
 - Steps:
   - `[-]` Inputs: ln e (or ln T), logit x, ln nH. Outputs: -softplus(.) for d ln e; a bounded update for logit x.
   - `[-]` Recover T, nHI, nHII analytically from (e, x, nH) for metrics and plots.
-  - `[-]` Keep the soft mass loss as a switchable ablation so the report's variant stays comparable.
+  - `[-]` Both parameterisations selectable by config: the report's (ln T, ln nHI, ln nHII) with soft mass loss, and the constrained one.
 - Effort: 1 day plus one training run.
-- Success: mass violation at float64 round-off; zero unphysical outputs; rollout metrics no worse than `REF` on Family 3.
+- Success: mass violation at float64 round-off; zero unphysical outputs; free-rollout metrics no worse than `REF` on Family 3.
 - Log: none yet.
 
 ### A5. Target and loss that resolve the flat regime `[-]`
@@ -248,7 +270,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 - Steps:
   - `[-]` Ramp and scheduler defined on optimiser steps or fraction of the wall-time budget, not nominal epochs.
   - `[-]` Resume restores epoch and ramp position and appends to the loss file.
-  - `[-]` Checkpoint selection on a short rollout metric from A2.
+  - `[-]` Checkpoint selection on a short free-rollout metric from A2 (no ground-truth states fed back).
   - `[-]` Data on GPU as tensors instead of a 4-worker DataLoader; test float32 forward with float64 accumulation for speed.
   - `[-]` Fix seeds; save the config in the run folder.
 - Effort: 0.5 to 1 day.
@@ -257,15 +279,43 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 
 ## 6. Tasks: larger experiments
 
+### B3. Physics-informed terms: which ones help (central study) `[-]`
+- Goal: establish, by controlled ablation, which ways of imposing physics improve the free rollout, alone and in combination, and carry the winning combination into the final models.
+- Why: the physics-informed part is the centre of the project (section 2). The report ended with a single soft mass term after the rate and energy losses were abandoned (report 2.3.2); R5 shows the rates themselves are correct, so those losses can return in a stiffness-aware form.
+- Candidate physics terms:
+  - P1 soft mass conservation in log space (the report's term).
+  - P2 hard constraints through the architecture (A4): exact mass conservation, bounded x, energy never increasing.
+  - P3 soft energy monotonicity: penalty on predicted increases of internal energy (soft counterpart of part of P2).
+  - P4 chemistry residual: predicted change of x against k1, k2 (k57) evaluated at the predicted state, in implicit or trapezoid form.
+  - P5 ionisation-equilibrium constraint x = x_eq(T) where the relaxation time is far below the step (the regime where P4 is ill-conditioned).
+  - P6 energy residual: predicted change of internal energy against the analytic cooling function.
+  - P7 composition consistency (variable-step models, B1): map(dt1 + dt2) = map(dt2) after map(dt1).
+  - P8 ODE residual by differentiating the map with respect to dt (variable-step models, B1), on collocation points without data.
+- Steps:
+  - `[-]` Restore `GrackleRates` from commit `475ca3b`; unit-test k1, k2, k57 and the four cooling terms against the regenerated Grackle output (target: R5's 1e-4 to 5e-3 agreement outside equilibrium).
+  - `[-]` Implement P1 to P6 as switchable loss terms with a common weighting interface.
+  - `[-]` Weighting test (small): fixed weight vs linear ramp vs gradient-norm balancing, on P1 alone and on P4 alone.
+  - `[-]` Screening protocol: fixed-step model from A5, reduced dataset, equal budget per run (about 2 to 3 GPU-hours), identical seed; score with the A2 free-rollout table.
+  - `[-]` Stage 1, one at a time: no physics; P1; P2; P3; P4; P5; P6 (7 runs).
+  - `[-]` Stage 2, pairs: all pairs among the terms that did not hurt in stage 1 (at most 15 runs; P2 with P1 or P3 only where not redundant).
+  - `[-]` Stage 3, triples and larger sets: built greedily from the best pairs (about 5 to 10 runs), plus "all terms".
+  - `[-]` Stage 4, confirmation: the best 3 configurations and "no physics" at full budget with 3 seeds each.
+  - `[-]` Data-efficiency test: best configuration vs "no physics" with 10x fewer training trajectories.
+  - `[-]` Stage 5, after B1: P7 and P8 alone, together and with the best stage-4 set, on the variable-step model.
+- Effort: 2 to 3 weeks; roughly 40 screening runs (about 100 GPU-hours) plus 12 full runs.
+- Success: a table with one row per configuration and the A2 columns, with seed spread for the confirmed ones; a stated answer for each term (helps / neutral / hurts, and on which family); at least one physics configuration beating "no physics" on the free rollout beyond the seed spread, or a documented negative result.
+- Log: none yet.
+
 ### B1. Flow map with scaled time as input (main bet) `[-]`
 - Goal: a model state(t), nH x dt -> state(t + dt) valid for dt from 100 yr to 2.5 Myr, so a 2.5 Myr evolution takes one or a few evaluations instead of 25,000.
-- Why: R3, R4 and report 4.3. Error accumulation, the report's central problem, is removed by construction. A SWIFT surrogate needs variable `dt` anyway.
+- Why: R3, R4 and report 4.3. Error accumulation, the report's central problem, is reduced by construction. The step is free to choose (section 2), so it can be fixed, drawn from a range, or set from the stiffness of the current predicted state.
 - Steps:
   - `[-]` Verify the scaling over the whole grid (all x0, all T0) and quantify the residual; keep ln nH as a weak extra input if it is not negligible.
   - `[-]` Build training pairs (row i, row j > i) from existing trajectories, dt log-uniform; sample pairs uniformly in (T, x, ln(nH dt)).
   - `[-]` Network: inputs (ln e, logit x, ln(nH dt)), outputs as in A4, identity as dt -> 0 built in.
-  - `[-]` Evaluate with one jump, with k jumps (k = 2 to 100), and against the fixed-step models of A5.
-- Risk: the map is steep in dt near the cliff, so one-jump errors appear as cliff-time errors. Mitigation: sub-step near the cliff; B3's composition loss.
+  - `[-]` Evaluate with one jump from the initial condition, with k chained jumps (k = 2 to 100, each fed only the previous prediction), with a stiffness-adaptive step chosen from the predicted state, and against the fixed-step models of A5.
+  - `[-]` Physics terms P7 and P8 of B3 (stage 5).
+- Risk: the map is steep in dt near the cliff, so one-jump errors appear as cliff-time errors. Mitigation: smaller steps near the cliff; composition loss P7.
 - Effort: 1 to 2 weeks including runs.
 - Success: A2 metrics at or below A5 on all families with at most 100 evaluations per trajectory; speed-up over Grackle measured in B4.
 - Log: none yet.
@@ -278,18 +328,6 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - `[-]` Noise injection on inputs at the scale of the model's own one-step error.
 - Effort: 3 to 5 days plus runs.
 - Success: rollout 95th-percentile error reduced against A5 at equal one-step error.
-- Log: none yet.
-
-### B3. Physics-informed terms that respect stiffness `[-]`
-- Goal: bring back equation-based losses in a form that trains.
-- Why: report section 2.3.2 (rate and energy losses abandoned) and R5 (the rates are correct outside ionisation equilibrium).
-- Steps:
-  - `[-]` Restore `GrackleRates` from commit `475ca3b`; unit-test k1, k2 and the cooling function against Grackle output.
-  - `[-]` Composition loss for B1: map(dt1 + dt2) = map(dt2) after map(dt1), on unlabelled states.
-  - `[-]` ODE residual for B1: derivative of the map with respect to dt equals the right-hand side at the predicted state, replaced by x = x_eq(T) where the ionisation relaxation time is far below dt.
-  - `[-]` Collocation points in regions without data; repeat with 10x fewer trajectories.
-- Effort: 1 to 2 weeks.
-- Success: same A2 metrics with 10x less training data, or lower cliff-time error at equal data.
 - Log: none yet.
 
 ### B4. Reference baselines and speed `[-]`
@@ -310,16 +348,31 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 - Log: none yet.
 
 ### B6. Scope extensions `[-]`
-- `[-]` Helium species and electrons; UV background and heating (breaks the nH x t scaling, so density returns as a full input).
-- `[-]` ONNX export and SWIFT coupling following `Lessandre/export_onnx.py`.
+- `[-]` First: helium species and electrons; UV background and heating (breaks the nH x t scaling, so density returns as a full input; energy is no longer monotone, so P2/P3 change form).
+- `[-]` Second: ONNX export and SWIFT coupling following `Lessandre/export_onnx.py`.
 - Effort: open-ended; not planned in detail.
+- Log: none yet.
+
+## 6b. Tasks: deliverable
+
+### C1. Updated report `[-]`
+- Goal: a revised version of the June report built on the new results. No deadline.
+- Steps:
+  - `[-]` Replace the qualitative results by the A2 table (as reported, `REF-A`, `REF-B`, new models), all from free rollouts.
+  - `[-]` Rewrite the diagnosis of Models A and B if A5 confirms R3 (flat-regime resolution rather than dataset balance).
+  - `[-]` New section on the physics-informed study (B3 table and conclusions).
+  - `[-]` New section on the variable-step model (B1) and on cost vs Grackle (B4).
+  - `[-]` Correct the points where report and code disagreed (R2) and describe the data timing fix (A3).
+  - `[-]` Regenerate all figures from `evaluate.py`.
+- Effort: 1 to 2 weeks, after B3 and B1.
+- Success: every number and figure in the report is produced by a committed script and a run listed in section 8.
 - Log: none yet.
 
 ## 7. Recommended order
 
 - A1 -> A2 (harness) -> A3 -> A2 (reference runs) -> A4 -> A6 -> A5
-- then B1 -> B4 -> B3 -> B2 -> B5 -> B6.
-- A5 and B1 are the two tasks expected to change the results; the others make their comparison with the report valid.
+- then B3 stages 1 to 4 -> B1 -> B3 stage 5 -> B4 -> B2 -> B5 -> C1 -> B6.
+- A5, B3 and B1 are the tasks expected to change the results; the others make their comparison with the report valid.
 
 ## 8. Run registry
 
@@ -340,18 +393,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 
 ## 9. Open questions
 
-### 9.1 Answered
-- Q1 (accounts): answered 2026-11-14, see sections 2 and 3. Remaining part moved to Q11.
-- Q2 (which checkpoints are Model A and B): answered 2026-11-14, see section 2.
-- Q7 (deleting files, moving the environment): answered 2026-11-14, see section 2.
-
-### 9.2 Open
-- Q3. Is the multi-file `visualise.py` from 9 June available anywhere else (laptop, other clone)? Otherwise A2 rebuilds it.
-- Q4. What is the deliverable (updated report, paper, thesis continuation) and is there a deadline?
-- Q5. Must the model remain a "PINN" with an explicit physics loss term? A4 makes mass conservation exact by construction, which removes the mass loss; B3 adds physics terms back in another form.
-- Q6. Is the fixed 100-yr step a requirement from the supervisor or the SWIFT use-case? Which range of time steps and densities does the target application need?
-- Q8. May the Grackle driver be changed (A3)? The regenerated truth will differ slightly from the data behind the report.
-- Q9. Was `Active_Files/` (1,000 `params_active.txt` trajectories) used for a model in the report, or only for the activity plots?
-- Q10. After hydrogen-only works: helium and UV background first, or SWIFT coupling first?
-- Q11. GPU cluster: jed has no GPU and only jed's accounts are visible from it. Which GPU cluster should training use (Izar as in June, or another), and should jobs be submitted by a session started on that cluster's login node or over `ssh` from jed? Are the Izar scratch datasets (`Full_Grackle_Data`, `Balanced_Dataset`, `Fam3_Dataset`, `Filtered_Data`) still there, or is everything regenerated from the IC lists?
-- Q12. The script that built the variance-stratified dataset (800 / 250 / 250 files out of 15,000) is not in the repo; `active.py` only copies the top 3,000. Is it available, or should `REF-A` use a re-implementation from the report's description?
+- All earlier questions (Q1 to Q12) are answered; the answers are recorded in section 2 and applied in the tasks.
+- Q13. GPU budget: B3 as planned needs about 40 short runs and 12 full runs (roughly 450 GPU-hours in total with the two reference runs). Is there a limit on GPU-hours or on simultaneous jobs I should respect beyond the Slurm limits (5 jobs on the `cs-302` QOS)?
+- Q14. Is the LaTeX source of the June report available (only the PDF is in the repository)? C1 needs it; otherwise the updated report is rewritten from the PDF text.
+- Q15. `REF-A` and `REF-B` will be trained on the regenerated, timing-corrected data, not on a copy of the June data (which no longer exists). They are therefore "the report's configuration on clean data", not exact replicas. Is that acceptable as the numeric stand-in for Models A and B?

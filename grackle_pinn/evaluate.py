@@ -21,6 +21,7 @@ import pandas as pd
 import torch
 
 from grackle_pinn.model import PINN
+from grackle_pinn.param import build as build_param
 
 LN10 = np.log(10.0)
 COL_T, COL_HI, COL_HII = 3, 6, 7          # columns of the Grackle output files
@@ -31,13 +32,17 @@ DEFAULT_FAMILY_CSV = "scripts/datagen/families/Trajectory_Families.csv"
 
 # --------------------------------------------------------------------------- model
 def load_model(ckpt_path, scaling_path=None, device="cpu", dtype=torch.float64):
-    """Build the network from the checkpoint tensors (width and depth are inferred) and load scaling."""
-    d = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+    """Build the network from a checkpoint. New checkpoints (A6) carry architecture, scaling and parameterisation;
+    legacy ones are handled by inferring width/depth from the tensors and reading the sibling scaling file."""
+    d = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     sd = d["model"] if "model" in d else d
-    weights = [k for k in sd if k.endswith("weight")]
-    hidden = sd[weights[0]].shape[0]
-    hidden_layers = len(weights) - 2
-    model = PINN(3, 3, hidden_dim=hidden, hidden_layers=hidden_layers)
+    param = build_param(d.get("param")) if "param" in d else build_param(None)
+    if "arch" in d:
+        hidden, hidden_layers = d["arch"]["hidden_dim"], d["arch"]["hidden_layers"]
+    else:
+        weights = [k for k in sd if k.endswith("weight")]
+        hidden, hidden_layers = sd[weights[0]].shape[0], len(weights) - 2
+    model = PINN(param.in_dim, param.out_dim, hidden_dim=hidden, hidden_layers=hidden_layers)
     model.load_state_dict(sd)
     model = model.to(device=device, dtype=dtype).eval()
 
@@ -49,38 +54,64 @@ def load_model(ckpt_path, scaling_path=None, device="cpu", dtype=torch.float64):
             scaling_path = os.path.join(os.path.dirname(ckpt_path), f"scaling_params_{name}")
         scaling = torch.load(scaling_path, map_location="cpu", weights_only=True)
     sc = {k: scaling[k].to(device=device, dtype=dtype) for k in ("in_mean", "in_std", "tg_mean", "tg_std")}
-    return model, sc, {"hidden": hidden, "hidden_layers": hidden_layers, "scaling_file": scaling_path}
+    return model, sc, {"hidden": hidden, "hidden_layers": hidden_layers, "scaling_file": scaling_path,
+                       "param": param, "param_config": param.config()}
 
 
-def step(model, sc, state):
+def step(model, sc, state, param=None):
     """One model step on log-states (B, 3): returns the new log-state."""
-    x = (state - sc["in_mean"]) / (sc["in_std"] + 1e-8)
-    return state + model(x) * (sc["tg_std"] + 1e-8) + sc["tg_mean"]
+    return (param or build_param(None)).step(model, sc, state)
 
 
 @torch.no_grad()
-def rollout(model, sc, state0, n_steps):
+def rollout(model, sc, state0, n_steps, param=None):
     """Free rollout. state0: (B, 3) log [T, nHI, nHII]. Returns (B, n_steps + 1, 3) on the CPU as float64.
 
     Only state0 and the model's own previous output are used.
     """
+    param = param or build_param(None)
     out = torch.empty(state0.shape[0], n_steps + 1, 3, dtype=state0.dtype, device=state0.device)
     out[:, 0] = state0
     s = state0
     for i in range(n_steps):
-        s = step(model, sc, s)
+        s = param.step(model, sc, s)
         out[:, i + 1] = s
     return out.cpu().double().numpy()
 
 
 @torch.no_grad()
-def one_step_teacher_forced(model, sc, truth_log):
+def window_rollout_score(model, param, sc, truth_ls, window, starts, cap_dex=50.0):
+    """Checkpoint-selection score: free rollouts of `window` steps started at the true state of rows `starts`
+    (the first state of each window is the only ground truth used). Mean |d log10| over time, the three variables,
+    windows and trajectories, each element capped at `cap_dex`. Lower is better.
+
+    truth_ls: tensor (n_traj, n_rows, 3) of ln states on the model device."""
+    was_training = model.training
+    model.eval()
+    starts = [s for s in starts if s + window < truth_ls.shape[1]]
+    s0 = torch.cat([truth_ls[:, s] for s in starts])
+    pred = torch.empty(s0.shape[0], window + 1, 3, dtype=s0.dtype, device=s0.device)
+    pred[:, 0] = s0
+    cur = s0
+    for i in range(window):
+        cur = param.step(model, sc, cur)
+        pred[:, i + 1] = cur
+    truth = torch.cat([truth_ls[:, s:s + window + 1] for s in starts])
+    err = (pred - truth).abs() / LN10
+    err = torch.nan_to_num(err, nan=cap_dex, posinf=cap_dex).clamp(max=cap_dex)
+    model.train(was_training)
+    return err.mean().item()
+
+
+@torch.no_grad()
+def one_step_teacher_forced(model, sc, truth_log, param=None):
     """Diagnostic only: one-step prediction from the TRUE state. truth_log: (B, n+1, 3) -> (B, n, 3)."""
+    param = param or build_param(None)
     B, n1, _ = truth_log.shape
     s = torch.from_numpy(truth_log[:, :-1].reshape(-1, 3)).to(sc["in_mean"])
     chunks = []
     for part in torch.split(s, 1 << 18):
-        chunks.append((step(model, sc, part) - part).cpu().double())
+        chunks.append((param.step(model, sc, part) - part).cpu().double())
     return torch.cat(chunks).numpy().reshape(B, n1 - 1, 3)
 
 
@@ -233,18 +264,18 @@ def evaluate(ckpt, scaling, items, device, dtype, label, set_name, max_steps=Non
     for n_rows, names in by_len.items():
         truth = np.stack([trajs[n][1] for n in names])
         state0 = torch.from_numpy(truth[:, 0]).to(device=device, dtype=dtype)
-        pred = rollout(model, sc, state0, n_rows - 1)
+        pred = rollout(model, sc, state0, n_rows - 1, info["param"])
         for i, n in enumerate(names):
             m = trajectory_metrics(truth[i], pred[i])
             m.update(name=n, family=trajs[n][0])
             per_traj.append(m)
             if plot_dir:
                 plot_rollout(n, truth[i], pred[i], os.path.join(plot_dir, f"{label}_{n}.png"))
-        diag_rows.append(diagnostics_one_step(truth, one_step_teacher_forced(model, sc, truth)))
+        diag_rows.append(diagnostics_one_step(truth, one_step_teacher_forced(model, sc, truth, info["param"])))
     fams = sorted({r["family"] for r in per_traj})
     return {
         "label": label, "set": set_name, "ckpt": ckpt, "dtype": str(dtype).replace("torch.", ""),
-        "architecture": info, "rollout_free": True,
+        "architecture": {k: v for k, v in info.items() if k != "param"}, "rollout_free": True,
         "overall": aggregate(per_traj),
         "per_family": {str(f): aggregate([r for r in per_traj if r["family"] == f]) for f in fams},
         "per_trajectory": per_traj,

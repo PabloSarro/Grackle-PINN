@@ -45,6 +45,8 @@ sbatch --account=<acc> --qos=<qos> --export=ALL,CONFIG=configs/<run>.json jobs/t
 
 Run outputs (checkpoints, scaling file, loss history, copy of the config) go to `results/runs/<run_name>/`; Slurm logs to `results/logs/`. Locally: `python -m grackle_pinn.train --config configs/<run>.json` from the repository root.
 
+Config keys are listed in `DEFAULTS` of `grackle_pinn/train.py` (parameterisation `report` or `constrained`, ramp, selection, seed, dtype). Resumed runs reproduce uninterrupted ones exactly. Tests: `sbatch --account=<acc> --qos=debug jobs/test.job`.
+
 ## Evaluation
 
-The evaluation harness (`grackle_pinn/evaluate.py`, free rollout from the initial condition only) is task A2 and does not exist yet. The old `visualise.py` and `ComputeMSE.py` are in `archive/`.
+`python -m grackle_pinn.evaluate run --ckpt <checkpoint> --label <name> --set report|grid|npz:<file>` runs free rollouts from the initial condition only and writes metrics to `results/eval/`; `... table results/eval/*.json` prints the Markdown table (`results/baseline.md`). The old `visualise.py` and `ComputeMSE.py` are in `archive/`.

@@ -36,9 +36,9 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - `[~]` A1 Simplify the repository structure
   - `[~]` A2 Evaluation harness and numeric baseline
   - `[X]` A3 Clean ground-truth generation and dataset rebuild
-  - `[-]` A4 State variables with built-in constraints
+  - `[~]` A4 State variables with built-in constraints
   - `[-]` A5 Target and loss that resolve the flat regime
-  - `[-]` A6 Training-loop fixes
+  - `[X]` A6 Training-loop fixes
 - Larger experiments
   - `[-]` B3 Physics-informed terms: which ones help (central study)
   - `[-]` B1 Flow map with scaled time as input
@@ -49,7 +49,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - `[-]` B7 Training-set sampling strategies
 - Deliverable
   - `[-]` C1 Updated report
-- Next step: the two reference runs `REF-A`, `REF-B` (finish A2), then A4 (after Pablo's go-ahead). A1 is done apart from its listed deviations.
+- Next step: wait for `REF-A`, `REF-B` and `A4-C-B`, then score them (A2, A4); the two reference runs `REF-A`, `REF-B` (finish A2), then A4 (after Pablo's go-ahead). A1 is done apart from its listed deviations.
 
 ## 1. Baseline: what the report states
 
@@ -285,17 +285,24 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - 2026-11-14 | Family labels | the grid ICs and their order are unchanged, so `Trajectory_Families.csv` (family per grid file) is reused; the kNN oracle (k = 3, report) labels the validation files | not re-clustered on the new trajectories | OK.
 
 
-### A4. State variables with built-in constraints `[-]`
+### A4. State variables with built-in constraints `[~]`
 - Goal: the network predicts in (internal energy, ionised fraction x) with nH carried through unchanged, as one of the ways of imposing physics.
 - Why: R3 and Fig. 3 bottom. Mass conservation becomes exact instead of a penalty with a weight to tune; energy can be forced non-increasing, which removes outputs like Fig. 4 bottom (T rising 20x) and bounds x to [0, 1].
 - Position in the project: this is physics imposed through the architecture ("hard" constraint). It does not replace the explicit physics losses, which stay mandatory (section 0.2); B3 compares hard, soft and combined variants.
 - Steps:
-  - `[-]` Inputs: ln e (or ln T), logit x, ln nH. Outputs: -softplus(.) for d ln e; a bounded update for logit x.
-  - `[-]` Recover T, nHI, nHII analytically from (e, x, nH) for metrics and plots.
-  - `[-]` Both parameterisations selectable by config: the report's (ln T, ln nHI, ln nHII) with soft mass loss, and the constrained one.
+  - `[X]` Inputs: ln e (or ln T), logit x, ln nH. Outputs: -softplus(.) for d ln e; a bounded update for logit x.
+  - `[X]` Recover T, nHI, nHII analytically from (e, x, nH) for metrics and plots.
+  - `[X]` Both parameterisations selectable by config: the report's (ln T, ln nHI, ln nHII) with soft mass loss, and the constrained one.
+  - `[~]` Training run on the REF-B data for the success check: `A4-C-B` (section 8.2), then scoring against `REF-B` on Family 3.
 - Effort: 1 day plus one training run.
 - Success: mass violation at float64 round-off; zero unphysical outputs; free-rollout metrics no worse than `REF` on Family 3.
-- Log: none yet.
+- Implementation: `grackle_pinn/param.py` (`report` and `constrained`), selected by `parameterisation` in the config; features z = (ln e, logit x, ln nH) with nH = nHI + nHII, x = nHII/nH, ln e = ln T + ln(1 + x); outputs d ln e = -softplus(o1) and d logit x = L tanh(o2), L = 1.25 x the largest |d logit x| in the training data (29.96 for the REF-B data); ln nH carried unchanged; last-layer bias of o1 set to -12 so that initial energy decrements are 6e-6 instead of 0.69. Checkpoints store the parameterisation, so `evaluate.py` rolls out either kind.
+- Log:
+  - 2026-11-14 | Data ranges that fix the design | `refB_valid` | d ln e <= 0 in every row (max -3.4e-10); |d logit x| up to 22.6 in one step (x from about 1e-10 to order 0.1); d ln e down to -2.26 in one step; logit x in [-10.3, 21.2] **[measured]** | bounded update L tanh(.) with L set from the data; the energy is non-increasing in the ground truth, so the constraint is consistent with it.
+  - 2026-11-14 | Unit tests (`tests/test_param_and_resume.py`, job 3252239) | real trajectories and 50 randomly re-initialised wild networks | round trip ln state -> z -> ln state 3.6e-15; advance(targets) reproduces the next state to 3.6e-15; worst mass violation 1.8e-15; 0 energy increases; x in (0, 1) | constraints hold for any network output.
+  - 2026-11-14 | 6-epoch smoke run on the REF-B data (`constrained_smoke`, job 3252240) scored on the 8 report trajectories | `results/eval_smoke` | mass violation 1.7e-16 overall, 0 energy increases, but T median 0.061 dex and Family 3 cliffs missed (2/2): untrained, as expected | only the constraints are verified here; accuracy comes from `A4-C-B`.
+  - 2026-11-14 | Submitted `A4-C-B` (constrained parameterisation, REF-B data and settings, 800 epochs) | job 3252249, account `env540`, QOS `normal` (`cs-302` and `math-454` slots hold REF-A/B) | running | -.
+
 
 ### A5. Target and loss that resolve the flat regime `[-]`
 - Goal: test the diagnosis of R3 on the fixed-100-yr model, changing only target and loss.
@@ -308,18 +315,28 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 - Success (provisional until A2 gives numbers): Families 0 to 2 final error in T under 0.02 dex at 2.5 Myr (report: 0.07 dex to tens of dex); Family 3 cliff time within 2% (report Fig. 6: about 7%); no regression on the Family 3 case of Fig. 5.
 - Log: none yet.
 
-### A6. Training-loop fixes `[-]`
+### A6. Training-loop fixes `[X]`
 - Goal: runs that finish what they are configured to do and select the right checkpoint.
 - Why: R2. `modelB_long` trained with under 10% of the intended physics weight, and "BEST" is chosen on a metric unrelated to rollout.
 - Steps:
-  - `[-]` Ramp and scheduler defined on optimiser steps or fraction of the wall-time budget, not nominal epochs.
-  - `[-]` Resume restores epoch and ramp position and appends to the loss file.
-  - `[-]` Checkpoint selection on a short free-rollout metric from A2 (no ground-truth states fed back).
-  - `[-]` Data on GPU as tensors instead of a 4-worker DataLoader; test float32 forward with float64 accumulation for speed.
-  - `[-]` Fix seeds; save the config in the run folder.
+  - `[X]` Ramp and scheduler defined on optimiser steps or fraction of the wall-time budget, not nominal epochs.
+  - `[X]` Resume restores epoch and ramp position and appends to the loss file.
+  - `[X]` Checkpoint selection on a short free-rollout metric from A2 (no ground-truth states fed back).
+  - `[X]` Data on GPU as tensors instead of a 4-worker DataLoader; test float32 forward with float64 accumulation for speed.
+  - `[X]` Fix seeds; save the config in the run folder.
 - Effort: 0.5 to 1 day.
 - Success: epoch time reduced (June: 72 to 89 s per epoch for 20 to 25M points); a resumed run reproduces an uninterrupted one; the selected checkpoint has the best rollout score among saved ones.
-- Log: none yet.
+- Implementation (`grackle_pinn/train.py`, rewritten; configs have new keys, see its `DEFAULTS`):
+  - Mass-loss ramp = step / planned steps (epochs x steps per epoch), so it always completes if the run finishes; an optional `budget_hours` makes it follow the wall clock too (not bit-reproducible, off by default).
+  - Checkpoints store epoch, step, best score, elapsed time, optimiser, scheduler, architecture, scaling, parameterisation and config; `--model` resumes exactly and appends to the loss file. The data order of epoch e depends only on (seed, e).
+  - Selection score = `window_rollout_score` in `evaluate.py`: 32 validation trajectories, free rollouts of 2,000 steps started at rows 0, 5,000, 10,000, 15,000, 20,000 (the first state of each window is the only ground truth used); mean |d log10| over time, variables, windows and trajectories, each element capped at 50 dex. One-step MSE is still logged. Windows of 2,000 steps cover the cooling cliffs only if one falls inside a window; a full 25,000-step rollout would cost about 30 s per check.
+  - Data live on the GPU as tensors (no DataLoader workers). Dtype is a config key.
+- Deviation from the success criterion: epoch time is not reduced. **[measured]** 112.6 s per epoch in float64 on 25.0M pairs (bench job 3252240), against June's 72 to 89 s and about 100 s for REF-A under the old loop: the 12 x 512 float64 network is compute-bound on a V100, not data-bound. Float32 halves it (58.3 s) but changes the numerics of training; not adopted.
+- Log:
+  - 2026-11-14 | Resume test, report and constrained parameterisations, 6 epochs against 3 + resume 3, tiny network, CPU/GPU node | `tests/test_param_and_resume.py`, job 3252239 | max weight difference 0.0 in both, loss file has 1 header + 6 lines (appended) | resume reproduces an uninterrupted run exactly. A first version failed (difference 2e-4) because the ramp followed the wall clock; fixed by making the wall-clock term opt-in.
+  - 2026-11-14 | Speed test, 3 epochs on `refA_train` | job 3252240, `results/bench/bench64.json`, `bench32.json` | float64 112.6 s per epoch, float32 58.3 s | see deviation above.
+  - 2026-11-14 | REF-A and REF-B were started with the June loop (one-step MSE selection, DataLoader, ramp on nominal epochs: 900 epochs planned, about 108 s per epoch means it will stop near epoch 780 at the 23.5 h limit, ramp about 87% of its maximum). They are kept as the "report configuration on clean data" baseline | jobs 3252215, 3252217 | - | runs unchanged; later runs use the new loop.
+
 
 ## 6. Tasks: larger experiments
 
@@ -454,6 +471,8 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 - Entry format: `run id | date | task | data | config | account, QOS, fair-share at submission, job id | status | key metrics | verdict`.
 - `REF-A` | 2026-11-14 | A2 | `refA_train.npz` (25.0M pairs, 1,000 files), valid `refA_valid.npz` (300) | `configs/refA.json`: 12 x 512 tanh, float64, batch 8192, lr 1e-4, weight factor 20, mass ramp 1e7 x epoch/899, 900 epochs, stop at 23.5 h | account `cs-302`, QOS `cs-302`, fair-share 0.261 (env540 0.325, math-454 0.180, master 0.024), job 3252215 | running (started 17:37) | - | -
 - `REF-B` | 2026-11-14 | A2 | `refB_train.npz` (20.0M pairs, 800 files), valid `refB_valid.npz` (200) | `configs/refB.json`, same as REF-A | account `math-454`, QOS `math-454`, fair-share 0.180, job 3252217 | running (started 17:38) | - | -
+- `bench64`, `bench32`, `constrained_smoke` | 2026-11-14 | A6/A4 | `refA_train` (first two), `refB_train` (last) | 3, 3 and 6 epochs, speed and smoke tests | `env540`, QOS `debug`, job 3252240 | finished | see A6/A4 logs | not models.
+- `A4-C-B` | 2026-11-14 | A4 | `refB_train.npz`, valid `refB_valid.npz` | `configs/A4-C-B.json`: constrained parameterisation, 12 x 512, float64, weight factor 20, 800 epochs, selection on free-rollout windows | account `env540`, QOS `normal`, fair-share 0.325, job 3252249 | running (started 18:58) | - | -
 - Configuration choice: the report's nominal 10,000 epochs would again leave the mass-loss ramp under 10% of its maximum (R2); 900 epochs fit the 24 h wall time (June: 72 to 89 s per epoch), so the ramp reaches its full 1e7. This is the only deviation from the report configuration. The checkpoints keep being chosen on one-step validation MSE until A6.
 
 ## 9. Open questions

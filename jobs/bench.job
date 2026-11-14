@@ -1,0 +1,18 @@
+#!/bin/bash
+# Speed and smoke tests of the training loop (A4/A6). Usage: sbatch --account=<acc> --qos=debug jobs/bench.job
+#SBATCH --job-name=PINNbench
+#SBATCH --time=00:55:00
+#SBATCH --gres=gpu:1
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=48G
+#SBATCH --partition=gpu
+#SBATCH --output=results/logs/bench_%j.log
+cd "$SLURM_SUBMIT_DIR"
+source /home/sarro/venvs/grackle-pinn/bin/activate
+nvidia-smi -L
+for c in bench64 bench32 constrained_smoke; do
+  echo "=== $c $(date)"
+  python -m grackle_pinn.train --config results/bench/$c.json
+done

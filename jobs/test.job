@@ -1,0 +1,14 @@
+#!/bin/bash
+# CPU/GPU unit tests (tests/). Usage: sbatch --account=<acc> --qos=debug jobs/test.job
+#SBATCH --job-name=PINNtest
+#SBATCH --time=00:30:00
+#SBATCH --gres=gpu:1
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G
+#SBATCH --partition=gpu
+#SBATCH --output=results/logs/test_%j.log
+cd "$SLURM_SUBMIT_DIR"
+source /home/sarro/venvs/grackle-pinn/bin/activate
+python tests/test_param_and_resume.py

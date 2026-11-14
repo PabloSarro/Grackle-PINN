@@ -8,58 +8,44 @@ import os
 m_H = 1.6726219e-24  # Hydrogen Mass
 
 class GrackleDataset(Dataset):
-    def __init__(self, folder_path, pattern="output_*.dat", in_mean=None, in_std=None, tg_mean=None, tg_std=None):
+    def __init__(self, folder_path, pattern="output_*.dat", in_mean=None, in_std=None, tg_mean=None, tg_std=None,
+                 param=None):
         """
         Load multiple Grackle simulations (will be our inputs).
+        With the default `report` parameterisation:
         PINN's input  (x): [log(y(t))] (and standardised), for y = T, nHI, nHII
         PINN's output (y): [log(y(t+dt)/y(t))] (and standardised), for y = T, nHI, nHII
+        Other parameterisations (grackle_pinn.param) define their own features and targets from the same
+        log-states. `folder_path` is a folder of text files or a compact .npz (see scripts/datasets).
         """
-        self.all_inputs = []
-        self.all_targets = []
-        
+        from grackle_pinn.param import Report
+        param = param or Report()
+        self.param = param
+        self.logstate = None   # (n_traj, n_rows, 3) when loaded from .npz; used for rollout-based selection
+
         if str(folder_path).endswith(".npz"):
             # Compact format (A3): logstate (n_traj, n_rows, 3) = ln [T, nHI, nHII]; adjacent rows form one step.
-            ls = np.load(folder_path)["logstate"]
-            self.all_inputs = [ls[:, :-1].reshape(-1, 3)]
-            self.all_targets = [np.diff(ls, axis=1).reshape(-1, 3)]
-            files = []
+            self.logstate = np.load(folder_path)["logstate"]
+            trajs = list(self.logstate)
         else:
             files = glob.glob(os.path.join(folder_path, pattern))
             if not files:
                 raise FileNotFoundError(f"No files found matching the pattern {pattern} in {folder_path}")
+            trajs = []
+            for f in files:
+                data = pd.read_csv(f, comment='#', sep=r'\s+', header=None)
+                trajs.append(np.log(data.iloc[:, [3, 6, 7]].values.astype(np.float64)))
 
-        # For each file
-        for f in files:
-            
-            # Extract the data
-            data = pd.read_csv(f, comment='#', sep='\s+', header=None)
- 
-            # Extract its state vectors
-            T = data.iloc[:, 3].values.astype(np.float64)
-            nHI = data.iloc[:, 6].values.astype(np.float64)
-            nHII = data.iloc[:, 7].values.astype(np.float64)
-                        
-            T_curr = T[:-1]            # T(t), for all t (except last one)
-            T_next = T[1:]             # T(t+dt), for all t (besides first)
-            T_targ = np.log(T_next)-np.log(T_curr)     # log(T(t+dt)/T(t))
-            
-            nHI_curr = nHI[:-1]        # nHI(t)
-            nHI_next = nHI[1:]         # nHI(t+dt)
-            nHI_targ = np.log(nHI_next)-np.log(nHI_curr)  # log(nHI(t+dt)/nHI(t))
-            
-            nHII_curr = nHII[:-1]      # nHII(t)
-            nHII_next = nHII[1:]       # nHII(t+dt)
-            nHII_targ = np.log(nHII_next)-np.log(nHII_curr)  # log(nHII(t+dt)/nHII(t))
+        inputs, targets = [], []
+        for ls in trajs:
+            cur = torch.from_numpy(ls[:-1])
+            nxt = torch.from_numpy(ls[1:])
+            inputs.append(param.features(cur))
+            targets.append(param.targets(cur, nxt))
+        self.all_inputs = torch.cat(inputs).to(torch.get_default_dtype())
+        self.all_targets = torch.cat(targets).to(torch.get_default_dtype())
 
-            # Stack into (N, 3) and (N, 3).
-            inputs = np.stack([np.log(T_curr), np.log(nHI_curr), np.log(nHII_curr)], axis=1)
-            targets = np.stack([T_targ, nHI_targ, nHII_targ], axis=1)
-
-            self.all_inputs.append(inputs)
-            self.all_targets.append(targets)
-
-        self.all_inputs = torch.from_numpy(np.concatenate(self.all_inputs, axis=0)).to(torch.get_default_dtype()) # To choose either 32 or 64-bit arithmetic.
-        self.all_targets = torch.from_numpy(np.concatenate(self.all_targets, axis=0)).to(torch.get_default_dtype())
+        self.target_absmax = self.all_targets.abs().max(dim=0).values
 
         print("Pre-normalising inputs and targets...")
         # If parameters are not provided, compute them (done for the Training set)

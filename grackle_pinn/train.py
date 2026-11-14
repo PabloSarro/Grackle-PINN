@@ -1,259 +1,213 @@
+"""Training loop (A6). One JSON config per run, see configs/.
+
+Differences from the June script (TASKS.md, R2 and A6):
+  - the mass-loss ramp and the stop are tied to optimiser steps / wall-time budget, not to a nominal epoch count;
+  - resume restores epoch, step, ramp position, optimiser, scheduler, best score and the elapsed training time,
+    and appends to the loss file; the data order of epoch e depends only on (seed, e), so a resumed run
+    reproduces an uninterrupted one;
+  - the best checkpoint is chosen on a short free-rollout score (the model only sees a window's first state and
+    its own predictions), not on the one-step MSE (still logged);
+  - data live on the GPU as tensors; seeds are fixed; the config, architecture, scaling and parameterisation are
+    stored in the run folder and in every checkpoint.
+"""
 import os
+import sys
 import json
-import shutil
 import time
-import torch
+import shutil
 import argparse
+
+import torch
+
 from grackle_pinn.model import PINN
-from grackle_pinn.metrics import ComputeMSE
+from grackle_pinn.param import build as build_param
 from grackle_pinn.data_utils import GrackleDataset
 from grackle_pinn.physics import PhysicsLossManager
-from torch.utils.data import DataLoader
+from grackle_pinn.evaluate import window_rollout_score
 
-
-# Run configuration: one JSON file per experiment (see configs/).
-CONFIG_KEYS = dict(
+DEFAULTS = dict(
     run_name=None, train_path=None, valid_path=None, out_dir="results/runs",
-    max_runtime_hours=23.75, batch_size=8192, learning_rate=1.0e-4, epochs=5000,
-    check_every=10, weight_factor=10.0,
-)
-starting_time = time.time()
-
-# Argument Parsing (if refining a pre-trained model)
-parser = argparse.ArgumentParser(description="Train Grackle PINN")
-parser.add_argument('--config', type=str, required=True, help='Path to the JSON configuration of the run')
-parser.add_argument('--model', type=str, default=None, 
-                    help='Path to pre-trained model .pth file (leaves it as None to train from scratch)')
-args = parser.parse_args()
-
-cfg = dict(CONFIG_KEYS)
-with open(args.config) as f:
-    cfg.update(json.load(f))
-os.makedirs(os.path.join(cfg["out_dir"], cfg["run_name"]), exist_ok=True)
-_out = lambda name: os.path.join(cfg["out_dir"], cfg["run_name"], name)
-shutil.copy(args.config, _out("config.json"))
-
-MODEL_NAME = _out(f"PINN_{cfg['run_name']}.pth")
-BEST_NAME = _out(f"PINN_BEST_{cfg['run_name']}.pth")
-SCALING_NAME = _out(f"scaling_params_{cfg['run_name']}.pth")
-LOSSES_NAME = _out(f"losses_{cfg['run_name']}.txt")
-TRAIN_PATH, VALID_PATH = cfg["train_path"], cfg["valid_path"]
-MAX_RUNTIME_SECONDS = cfg["max_runtime_hours"] * 3600
-
-# Global Precision Setup: 64-bit arithmetic
-torch.set_default_dtype(torch.float64)
-
-# Initial Configuration and Hyperparameters
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
-print(f"Training Precision: {torch.get_default_dtype()}")
-
-# Training parameters.
-BATCH_SIZE = cfg["batch_size"]
-LEARNING_RATE = cfg["learning_rate"]
-EPOCHS = cfg["epochs"]
-CHECK_EVERY = cfg["check_every"] # Epoch frequency for which validation loss is computed.
-
-# Training Data Loading
-dataset = GrackleDataset(folder_path=TRAIN_PATH)
-dataloader = DataLoader(
-    dataset, 
-    batch_size=BATCH_SIZE, 
-    shuffle=True,
-    num_workers=4,
-    pin_memory=True,
-    persistent_workers=True
-)
-torch.save({
-    'in_mean': dataset.in_mean,
-    'in_std': dataset.in_std,
-    'tg_mean': dataset.tg_mean,
-    'tg_std': dataset.tg_std
-}, SCALING_NAME)
-print(f"Scaling parameters saved to {SCALING_NAME}")
-
-# Validation Data Loading
-dataset_valid = GrackleDataset(
-    folder_path=VALID_PATH,
-    in_mean=dataset.in_mean,   # Force validation data to use Training means and stds
-    in_std=dataset.in_std,
-    tg_mean=dataset.tg_mean,
-    tg_std=dataset.tg_std
-)
-dataloader_valid = DataLoader(
-    dataset_valid, 
-    batch_size=BATCH_SIZE, 
-    shuffle=False,
-    num_workers=4,
-    pin_memory=True,
-    persistent_workers=True # DEBUG?
+    hidden_dim=512, hidden_layers=12, parameterisation="report",
+    batch_size=8192, learning_rate=1.0e-4, epochs=900, check_every=10,
+    weight_factor=10.0, lambda_mass_max=1.0e7, ramp_fraction=1.0,
+    max_runtime_hours=23.5, budget_hours=None,        # None: ramp follows optimiser steps only; a number: also follows that wall-clock budget
+    scheduler_patience=5, scheduler_factor=0.5, min_lr=1e-6, grad_clip=50.0,
+    seed=0, dtype="float64", stop_after_epochs=None,   # the last one is for tests of resume
+    select_on="rollout",                              # "rollout" (free-rollout window score) or "mse"
+    rollout_trajectories=32, rollout_window=2000, rollout_starts=(0, 5000, 10000, 15000, 20000),
 )
 
-# Model, Optimiser, and Loss
-model = PINN(input_dim=3, output_dim=3, hidden_dim=512, hidden_layers=12).to(device)
-optimiser = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
-scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-    optimiser, 
-    mode='min',        # We want to minimize the loss
-    factor=0.5,        # Cut the learning rate in half when triggered
-    patience=5,        # If the loss doesn't reach a new low for 5*CHECK_EVERY = 50 epochs, trigger the cut
-    min_lr=1e-6        # Never drop the LR below this absolute floor
-)
 
-# Pre-trained model mechanism (or training from scratch, if nothing was specified) ---
-if args.model is not None:
-    if os.path.exists(args.model):
-        pre_trained = torch.load(args.model, map_location=device, weights_only=True)
-        # Load the weights natively onto your active device (CPU or GPU)
-        if 'model' in pre_trained:
-            model.load_state_dict(pre_trained['model'])
-            optimiser.load_state_dict(pre_trained["optimizer"])
-            scheduler.load_state_dict(pre_trained["scheduler"])
-            best_loss = pre_trained["best_loss"]
-        else:
-            model.load_state_dict(pre_trained)
-            best_loss = float('inf')
-        print(f"[✓] Successfully loaded pre-trained weights from: {args.model}")
-    else:
-        print(f"[!] CRITICAL: Specified model file '{args.model}' not found!")
-        import sys; sys.exit(1)
-else:
-    print("[#] No pre-trained model specified. Initialising and training from scratch.")
-    best_loss = float('inf')
+def parse():
+    ap = argparse.ArgumentParser(description="Train Grackle PINN")
+    ap.add_argument("--config", required=True)
+    ap.add_argument("--model", default=None, help="checkpoint to resume from (or to start from, if it has no epoch)")
+    return ap.parse_args()
 
 
-phys_manager = PhysicsLossManager(
-    model, 
-    in_mean=dataset.in_mean.to(device), 
-    in_std=dataset.in_std.to(device),
-    tg_mean=dataset.tg_mean.to(device),
-    tg_std=dataset.tg_std.to(device)
-)
+def main():
+    args = parse()
+    starting_time = time.time()
+    cfg = dict(DEFAULTS)
+    with open(args.config) as f:
+        cfg.update(json.load(f))
+    run_dir = os.path.join(cfg["out_dir"], cfg["run_name"])
+    os.makedirs(run_dir, exist_ok=True)
+    if os.path.abspath(args.config) != os.path.abspath(os.path.join(run_dir, "config.json")):
+        shutil.copy(args.config, os.path.join(run_dir, "config.json"))
+    out = lambda n: os.path.join(run_dir, n)
+    MODEL_NAME, BEST_NAME = out(f"PINN_{cfg['run_name']}.pth"), out(f"PINN_BEST_{cfg['run_name']}.pth")
+    SCALING_NAME, LOSSES_NAME = out(f"scaling_params_{cfg['run_name']}.pth"), out(f"losses_{cfg['run_name']}.txt")
 
-# Header write to losses file.
-with open(LOSSES_NAME, "w") as f:
-    f.write(f"Epoch  AvgDataLoss  AvgMassLoss AvgTotalLoss ValidationLoss\n")
+    dtype = getattr(torch, cfg["dtype"])
+    torch.set_default_dtype(dtype)
+    torch.manual_seed(cfg["seed"])
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}, precision {dtype}, parameterisation {cfg['parameterisation']}", flush=True)
+
+    # ---- resume information (needed before the data to know the parameterisation settings)
+    ckpt = None
+    if args.model is not None:
+        if not os.path.exists(args.model):
+            print(f"[!] CRITICAL: '{args.model}' not found"); sys.exit(1)
+        ckpt = torch.load(args.model, map_location="cpu", weights_only=False)
+    param_cfg = {"name": cfg["parameterisation"]}
+    if ckpt is not None and "param" in ckpt:
+        param_cfg = ckpt["param"]
+    param = build_param(param_cfg)
+
+    # ---- data
+    train_set = GrackleDataset(cfg["train_path"], param=param)
+    if param.name == "constrained" and ckpt is None:
+        param = build_param({"name": "constrained", "lmax": 1.25 * float(train_set.target_absmax[1])})
+        train_set = GrackleDataset(cfg["train_path"], param=param)   # same data, only the bound changes
+        print(f"constrained: |d logit x| <= {param.lmax:.3f}", flush=True)
+    sc_cpu = {"in_mean": train_set.in_mean, "in_std": train_set.in_std, "tg_mean": train_set.tg_mean, "tg_std": train_set.tg_std}
+    if ckpt is not None and "scaling" in ckpt:
+        sc_cpu = ckpt["scaling"]
+        train_set = GrackleDataset(cfg["train_path"], param=param, in_mean=sc_cpu["in_mean"], in_std=sc_cpu["in_std"],
+                                   tg_mean=sc_cpu["tg_mean"], tg_std=sc_cpu["tg_std"])
+    valid_set = GrackleDataset(cfg["valid_path"], param=param, **sc_cpu)
+    torch.save(sc_cpu, SCALING_NAME)
+    sc = {k: v.to(device) for k, v in sc_cpu.items()}
+    X, Y = train_set.all_inputs.to(device), train_set.all_targets.to(device)
+    Xv, Yv = valid_set.all_inputs.to(device), valid_set.all_targets.to(device)
+    N = X.shape[0]
+    BS = cfg["batch_size"]
+    steps_per_epoch = (N + BS - 1) // BS
+    planned_steps = cfg["epochs"] * steps_per_epoch
+    print(f"Training on {N} pairs, {steps_per_epoch} steps per epoch, {planned_steps} planned steps", flush=True)
+
+    use_rollout = cfg["select_on"] == "rollout" and valid_set.logstate is not None
+    if use_rollout:
+        val_ls = torch.from_numpy(valid_set.logstate[:cfg["rollout_trajectories"]]).to(device=device, dtype=dtype)
+
+    # ---- model, optimiser, scheduler
+    model = PINN(param.in_dim, param.out_dim, hidden_dim=cfg["hidden_dim"], hidden_layers=cfg["hidden_layers"]).to(device)
+    if ckpt is None:
+        param.init_model(model)
+    optimiser = torch.optim.Adam(model.parameters(), lr=cfg["learning_rate"])
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimiser, mode="min", factor=cfg["scheduler_factor"], patience=cfg["scheduler_patience"], min_lr=cfg["min_lr"])
+
+    start_epoch, step, best_score, elapsed_before, resumed = 0, 0, float("inf"), 0.0, False
+    if ckpt is not None:
+        model.load_state_dict(ckpt["model"] if "model" in ckpt else ckpt)
+        if "optimizer" in ckpt:
+            optimiser.load_state_dict(ckpt["optimizer"]); scheduler.load_state_dict(ckpt["scheduler"])
+        if "epoch" in ckpt:      # a checkpoint of this code: continue exactly
+            start_epoch, step = ckpt["epoch"], ckpt["step"]
+            best_score, elapsed_before, resumed = ckpt["best_score"], ckpt["elapsed"], True
+        print(f"[✓] loaded {args.model}; resumed={resumed}, start epoch {start_epoch}, step {step}", flush=True)
+
+    phys = PhysicsLossManager(model, sc["in_mean"], sc["in_std"], sc["tg_mean"], sc["tg_std"])
+    arch = {"hidden_dim": cfg["hidden_dim"], "hidden_layers": cfg["hidden_layers"],
+            "input_dim": param.in_dim, "output_dim": param.out_dim}
+
+    def save(path, epoch):
+        torch.save({"model": model.state_dict(), "optimizer": optimiser.state_dict(), "scheduler": scheduler.state_dict(),
+                    "epoch": epoch, "step": step, "best_score": best_score,
+                    "elapsed": elapsed_before + time.time() - starting_time,
+                    "arch": arch, "param": param.config(), "scaling": sc_cpu, "config": cfg}, path)
+
+    if not resumed:
+        with open(LOSSES_NAME, "w") as f:
+            f.write("Epoch AvgDataLoss AvgMassLoss AvgTotalLoss ValidationMSE RolloutScore LR\n")
+
+    @torch.no_grad()
+    def validation_mse():
+        model.eval()
+        tot = 0.0
+        for i in range(0, Xv.shape[0], 1 << 17):
+            p = param.to_standardised(model(Xv[i:i + (1 << 17)]), sc)
+            tot += ((p - Yv[i:i + (1 << 17)]) ** 2).sum().item()
+        return tot / Yv.numel()
+
+    budget_s = (cfg["budget_hours"] or cfg["max_runtime_hours"]) * 3600  # ramp follows it only if budget_hours is set
+    stop_s = cfg["max_runtime_hours"] * 3600
+    stopped_early = False
+    for epoch in range(start_epoch, cfg["epochs"]):
+        t0 = time.time()
+        model.train()
+        g = torch.Generator().manual_seed(cfg["seed"] * 100003 + epoch)
+        perm = torch.randperm(N, generator=g).to(device)
+        tot = dat = mas = 0.0
+        for i in range(0, N, BS):
+            idx = perm[i:i + BS]
+            bx, by = X[idx], Y[idx]
+            optimiser.zero_grad()
+            pred = param.to_standardised(model(bx), sc)
+            w = 1.0 + cfg["weight_factor"] * torch.abs(by)
+            loss_data = torch.mean(w * (pred - by) ** 2)
+            if param.name == "report":
+                loss_mass = phys.mass_conserv(bx, pred)
+                progress = step / (cfg["ramp_fraction"] * planned_steps)
+                if cfg["budget_hours"]:      # optional: also follow the wall-clock budget (not reproducible bit by bit)
+                    progress = max(progress, (elapsed_before + time.time() - starting_time) / (cfg["ramp_fraction"] * budget_s))
+                progress = min(1.0, progress)
+                lam = cfg["lambda_mass_max"] * progress
+            else:   # mass conservation is exact by construction
+                loss_mass, lam = torch.zeros((), device=device), 0.0
+            loss = loss_data + lam * loss_mass
+            if torch.isnan(loss):
+                print(f"[!] NaN at epoch {epoch + 1}, step {step}: data {loss_data.item():.4e}, mass {loss_mass.item():.4e}")
+                sys.exit(1)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=cfg["grad_clip"])
+            optimiser.step()
+            step += 1
+            tot += loss.item(); dat += loss_data.item(); mas += loss_mass.item()
+        nb = steps_per_epoch
+        mse_s, roll_s = "nan", "nan"
+        if epoch % cfg["check_every"] == 0 or epoch == cfg["epochs"] - 1:
+            mse = validation_mse()
+            mse_s = f"{mse:.6e}"
+            if use_rollout:
+                score = window_rollout_score(model, param, sc, val_ls, cfg["rollout_window"], cfg["rollout_starts"])
+                roll_s = f"{score:.6e}"
+            else:
+                score = mse
+            scheduler.step(score)
+            if score < best_score:
+                best_score = score
+                save(BEST_NAME, epoch + 1)
+                print(f"[✓] new best ({cfg['select_on'] if use_rollout else 'mse'}) {score:.6e} at epoch {epoch + 1}, MSE {mse_s}", flush=True)
+        lr = optimiser.param_groups[0]["lr"]
+        print(f"Epoch [{epoch + 1}/{cfg['epochs']}] loss {tot / nb:.6e} data {dat / nb:.6e} mass {mas / nb:.6e} "
+              f"val {mse_s} roll {roll_s} lr {lr:.2e} ({time.time() - t0:.1f} s)", flush=True)
+        with open(LOSSES_NAME, "a") as f:
+            f.write(f"{epoch + 1} {dat / nb:.6e} {mas / nb:.6e} {tot / nb:.6e} {mse_s} {roll_s} {lr:.3e}\n")
+        if (epoch + 1) % 20 == 0:
+            save(MODEL_NAME, epoch + 1)
+        if time.time() - starting_time > stop_s or (cfg["stop_after_epochs"] and epoch + 1 >= cfg["stop_after_epochs"]):
+            save(MODEL_NAME, epoch + 1)
+            print(f"[!] wall-time limit reached after epoch {epoch + 1}; checkpoint saved, resume with --model {MODEL_NAME}", flush=True)
+            stopped_early = True
+            break
+    if not stopped_early:
+        save(MODEL_NAME, cfg["epochs"])
+    print(f"Training {'stopped' if stopped_early else 'complete'} in {(time.time() - starting_time) / 3600:.2f} h.", flush=True)
 
 
-print(f"\nStarting training on {len(dataset)} points...")
-
-# 5. Training Loop
-for epoch in range(EPOCHS):
-    start = time.time()
-    # print(f"Epoch {epoch+1}")
-    model.train()
-    total_loss = 0
-    total_data_loss = 0
-    total_mass_loss = 0
-    valid_loss_str = "nan"
-    # batch_num = 0
-
-    for batch_x, batch_y in dataloader:
-        # print(f"Batch {batch_num+1}")
-        # batch_num += 1
-        # Move data to GPU
-        batch_x = batch_x.to(device)
-        batch_y = batch_y.to(device)
-        
-        optimiser.zero_grad()
-        
-        # Forward pass and losses
-        predictions = model(batch_x)
-
-        # Weighted Data Loss (punishes mistakes in spikes, keeps regular MSE in equilibrium)
-        weights = 1.0 + cfg["weight_factor"] * torch.abs(batch_y)
-        
-        # Calculate element-wise squared error, multiply by weights, then mean
-        loss_data = torch.mean(weights * (predictions - batch_y)**2)
-        loss_mass = phys_manager.mass_conserv(batch_x, predictions)
-
-        LAMBDA_MASS = 1e7*(epoch)/(EPOCHS-1)  
-        
-        # Total combined loss with weightings
-        loss = loss_data + LAMBDA_MASS * loss_mass
-
-        # ==== DEBUG BLOCK! ====
-        if torch.isnan(loss):
-            print(f"\n[!] NAN DETECTED at Epoch {epoch+1}")#, Batch {batch_num}")
-            print(f"Data Loss: {loss_data.item():.4e}")
-            print(f"Mass Loss: {loss_mass.item():.4e}")
-            print(f"Preds Max/Min: {predictions.max().item():.2f} / {predictions.min().item():.2f}")
-            print(f"Inputs Max/Min: {batch_x.max().item():.2f} / {batch_x.min().item():.2f}")
-            
-            # Check if the Ground Truth itself has NaNs
-            if torch.isnan(batch_y).any():
-                print("CRITICAL: NaNs found in batch_y (Ground Truth Data!)")
-            
-            # Stop the execution so you don't waste cluster credits
-            import sys; sys.exit(1)
-        # =======================
-
-        # Backward pass
-        loss.backward()
-        total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=50.0) # max_norm usually set to 0.5 to 10 times the average gradient norm.
-        optimiser.step()
-
-        total_loss += loss.item()
-        total_data_loss += loss_data.item()
-        total_mass_loss += loss_mass.item()
-    
-    avg_loss = total_loss / len(dataloader)
-    avg_data_loss = total_data_loss / len(dataloader)
-    avg_mass_loss = total_mass_loss / len(dataloader)
-    print(f"Epoch [{epoch+1}/{EPOCHS}] - Avg Loss = {avg_loss:.6e} --> Data: {avg_data_loss:.6e}, Mass: {avg_mass_loss:.6e}")
-
-    # Once every 'epoch_freq_valid' epochs,
-    if epoch % CHECK_EVERY == 0:
-        # Save the best model so far.
-        valid_loss = ComputeMSE(model, dataloader_valid, device)
-        valid_loss_str = f"{valid_loss:.6e}"
-        scheduler.step(valid_loss)
-
-        if valid_loss < best_loss:
-            best_loss = valid_loss
-            torch.save({
-                "model": model.state_dict(),
-                "optimizer": optimiser.state_dict(),
-                "scheduler": scheduler.state_dict(),
-                "best_loss": best_loss,
-            }, BEST_NAME)
-            print(f"[✓] New best model saved as: {BEST_NAME} ---> MSE_loss={valid_loss_str})")
-            
-
-    if epoch % 100 == 0:
-        torch.save({
-            "model": model.state_dict(),
-            "optimizer": optimiser.state_dict(),
-            "scheduler": scheduler.state_dict(),
-            "best_loss": best_loss
-        }, MODEL_NAME)
-        print(f"[✓] PERIODIC STORE: Current model saved as: {MODEL_NAME}")
-
-    # Log the training and validation losses in a file
-    with open(LOSSES_NAME, "a") as f:
-        f.write(f"{epoch+1} {avg_data_loss:.6e} {avg_mass_loss:.6e} {avg_loss:.6e} {valid_loss_str}\n")
-
-
-    # Store last model before job dies!
-    elapsed_time = time.time() - starting_time
-    if elapsed_time > MAX_RUNTIME_SECONDS:
-        torch.save({
-            "model": model.state_dict(),
-            "optimizer": optimiser.state_dict(),
-            "scheduler": scheduler.state_dict(),
-            "best_loss": best_loss
-        }, MODEL_NAME)
-        print(f"[!] CLOSE TO REACHING TIME LIMIT ({elapsed_time/3600:.2f} hours). Last model saved as: {MODEL_NAME}.")
-        break
-
-    print(f"Epoch {epoch+1}: {time.time() - start:.2e} seconds.")
-
-
-print(f"Training complete in {(time.time() - starting_time)/3600:.2f} hours.")
-torch.save({
-    "model": model.state_dict(),
-    "optimizer": optimiser.state_dict(),
-    "scheduler": scheduler.state_dict(),
-    "best_loss": best_loss
-}, MODEL_NAME)
-print(f"[✓] Final model saved as: {MODEL_NAME} ---> MSE_loss={ComputeMSE(model, dataloader_valid, device):.4e})")
+if __name__ == "__main__":
+    main()

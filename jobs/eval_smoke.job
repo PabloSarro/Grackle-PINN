@@ -1,0 +1,15 @@
+#!/bin/bash
+#SBATCH --job-name=EvalSmoke
+#SBATCH --time=00:20:00
+#SBATCH --gres=gpu:1
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G
+#SBATCH --partition=gpu
+#SBATCH --output=results/logs/eval_smoke_%j.log
+cd "$SLURM_SUBMIT_DIR"
+source /home/sarro/venvs/grackle-pinn/bin/activate
+python -m grackle_pinn.evaluate run --ckpt results/bench/constrained_smoke/PINN_BEST_constrained_smoke.pth --label smoke_constrained --set npz:data/datasets/report8.npz --out-dir results/eval_smoke
+python -m grackle_pinn.evaluate run --ckpt results/legacy/PINN_BEST_modelB_long.pth --label legacy_check --set report --max-steps 2000 --out-dir results/eval_smoke
+python -m grackle_pinn.evaluate table results/eval_smoke/*.json

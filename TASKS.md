@@ -34,7 +34,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - `[X]` R7 Check cluster accounts (jed, then Izar)
 - Quick wins
   - `[~]` A1 Simplify the repository structure
-  - `[-]` A2 Evaluation harness and numeric baseline
+  - `[~]` A2 Evaluation harness and numeric baseline
   - `[-]` A3 Clean ground-truth generation and dataset rebuild
   - `[-]` A4 State variables with built-in constraints
   - `[-]` A5 Target and loss that resolve the flat regime
@@ -49,7 +49,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - `[-]` B7 Training-set sampling strategies
 - Deliverable
   - `[-]` C1 Updated report
-- Next task to start: **A2** (after Pablo's go-ahead). A1 is done apart from the deviations listed in its section.
+- Next task to start: **A3** (after Pablo's go-ahead). A2 is waiting only for the regenerated data and the two reference runs; A1 is done apart from its listed deviations.
 
 ## 1. Baseline: what the report states
 
@@ -228,24 +228,34 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - 2026-11-14 | The login node was heavily loaded by other users (load average 35), so CPU smoke tests ran slowly | none | none.
 
 
-### A2. Evaluation harness and numeric baseline `[-]`
+### A2. Evaluation harness and numeric baseline `[~]`
 - Goal: a single `evaluate.py` that turns any checkpoint into a table of numbers, and reference numbers to compare against.
 - Why: section 1.2 and R2. The report has figures only, so "improved" cannot be measured yet. Per section 2, the June checkpoints are not accepted as Model A and B.
 - Steps:
-  - `[-]` Free rollout in float64 from the initial condition only, batched over trajectories; architecture and scaling read from the checkpoint (stored there from now on). This replaces the lost multi-file `visualise.py`.
-  - `[-]` Headline metrics (free rollout), per family and overall: error |d log10| for T, nHI, nHII (median, 95th percentile over time, value at 2.5 Myr); cliff-time error (time of steepest d ln T); mass-conservation violation max |ln(nH_pred / nH_0)|; count of unphysical outputs (T below 1 K, energy increasing).
-  - `[-]` Diagnostics (teacher-forced, labelled as such, never used as a result): one-step error binned by decade of the true increment.
-  - `[-]` Fixed evaluation sets: the 8 report-figure initial conditions and a per-family set from `Families/ICs_valid.txt` (200 ICs), all regenerated in A3.
-  - `[-]` "As reported" row: numbers read off the report figures (section 1.2), labelled as such.
-  - `[-]` Legacy checkpoints: score all seven runs in `results/legacy/` once, labelled "legacy, identity uncertain". Also once in float32 to quantify the precision effect found in R2.
+  - `[X]` Free rollout in float64 from the initial condition only, batched over trajectories; architecture and scaling read from the checkpoint (stored there from now on). This replaces the lost multi-file `visualise.py`.
+  - `[X]` Headline metrics (free rollout), per family and overall: error |d log10| for T, nHI, nHII (median, 95th percentile over time, value at 2.5 Myr); cliff-time error (time of steepest d ln T); mass-conservation violation max |ln(nH_pred / nH_0)|; count of unphysical outputs (T below 1 K, energy increasing).
+  - `[X]` Diagnostics (teacher-forced, labelled as such, never used as a result): one-step error binned by decade of the true increment.
+  - `[~]` Fixed evaluation sets: the 8 report-figure initial conditions and a per-family set from `Families/ICs_valid.txt` (200 ICs), all regenerated in A3.
+  - `[X]` "As reported" row: numbers read off the report figures (section 1.2), labelled as such.
+  - `[X]` Legacy checkpoints: score all seven runs in `results/legacy/` once, labelled "legacy, identity uncertain". Also once in float32 to quantify the precision effect found in R2.
   - `[-]` Reference runs with known provenance, report configuration (12 x 512, loss weight 20, soft mass loss ramp), trained through the cleaned pipeline on the data rebuilt in A3:
     - `REF-B`: kNN-balanced dataset from `Families/ICs_train.txt` and `ICs_valid.txt`.
     - `REF-A`: variance-stratified dataset, selection re-implemented from the report (A3).
-  - `[-]` Write `results/baseline.md` with the table; regenerate the layout of Figs. 3 to 9 from the same script.
+  - `[~]` Write `results/baseline.md` with the table; regenerate the layout of Figs. 3 to 9 from the same script.
 - Order: harness first (CPU), then A3, then the two reference runs.
 - Effort: 1 to 2 days for the harness; reference runs 24 GPU-hours each.
 - Success: baseline table committed with rows "as reported", legacy, `REF-A`, `REF-B`; every later task reports the same columns next to it.
-- Log: none yet.
+- Status notes:
+  - Harness done: `grackle_pinn/evaluate.py` (`run` and `table` commands), `jobs/evaluate_legacy.job`. Architecture is inferred from the checkpoint tensors and the scaling file from the sibling `scaling_params_<name>.pth` (A6 will store both in the checkpoint).
+  - Fixed sets: the 8 report-figure trajectories (`data/Plot_Files`) work; the grid subset available locally is only 507 files (Families 1 and 2 in the 50 sampled); the 200-IC per-family validation set needs the regenerated data (A3).
+  - `results/baseline.md` has the "as reported" and legacy rows; the `REF-A`/`REF-B` rows and the figure-layout regeneration (Figs. 3 to 9; `--plot` writes one 3-panel rollout figure per trajectory) are pending. The reference runs wait for A3, as planned in the Order line.
+  - Metric definitions are in the header of `results/baseline.md`. Energy increase uses e proportional to T (nHI + 2 nHII) / nH at fixed nH, threshold 1e-12 relative per step; the ground truth gives 0.
+- Log:
+  - 2026-11-14 | Harness written: batched float64 free rollout in log space (no exp until metrics), per-trajectory and per-family metrics, teacher-forced one-step RMS by decade of the true |d ln T| stored as diagnostics | `grackle_pinn/evaluate.py` | runs end-to-end | CPU login node too loaded (load 35) for tests, so all runs go through Slurm.
+  - 2026-11-14 | Scored all 14 legacy checkpoints on the report set (float64, float32) and on 50 grid trajectories (float64) | job 3252188, account `cs-302`, QOS `cs-302` (fair-share 0.318), 19 m 55 s, 42 result files in `results/eval/` | see `results/baseline.md`; on the report set the best are `legacy_modelB_long` (T median 0.080 dex, final 0.162 dex, nHI/nHII final 0.023/0.041) and `legacy_BEST_noClamp_Long` (0.092, 0.248); the worst are `legacy_modelB`/`BEST_modelB` (final T 15 and 8.6 dex), `legacy_1` on Family 0 (final T 225 dex) and the `fam3` runs (0.6 to 1.8 dex median) | confirms the baseline can now be measured.
+  - 2026-11-14 | Consequence for model identity | `legacy_modelB_long` on Family 3: T final 0.127 dex, against about 2 dex for Model B in the report | the June checkpoint named `modelB_long` is not the report's Model B, as stated in section 2; the need for `REF-A`/`REF-B` stands.
+  - 2026-11-14 | Precision check (R2 finding) | float32 vs float64 rollouts of the same 14 checkpoints on the report set (8 trajectories) | the median T error changes by under 8% for 12 of 14 checkpoints (ratios 0.92 to 1.07) and by x1.70 (`legacy_modelB`) and x0.67 (`legacy_modelB_long`) for the other two; the T error at 2.5 Myr changes by x0.44 to x1.5 for `legacy_modelB_long`, `legacy_BEST_noClamp_Long` and `legacy_modelB`, and by under 10% for the rest | float32 is not a first-order effect but moves some single rollouts by about a factor 2 in either direction; keep float64 for all numbers.
+  - 2026-11-14 | Energy monotonicity | last column of `results/baseline.md`, report set, float64 | fraction of steps with increasing energy (truth: 0) is 0.002 to 0.005 for the two `fam3_long` checkpoints and `legacy_noClamp_Long`, 0.07 for `legacy_BEST_noClamp_Long`, and 0.17 to 0.86 for the rest | most checkpoints violate energy monotonicity on a large fraction of steps, which supports testing P2 and P3 in B3.
 
 ### A3. Clean ground-truth generation and dataset rebuild `[-]`
 - Goal: all datasets regenerated (the June scratch copies are gone), with rows exactly 100 yr apart, one integration scheme at all times, full precision and a fast format.

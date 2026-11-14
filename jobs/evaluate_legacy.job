@@ -1,0 +1,20 @@
+#!/bin/bash
+# Scores every legacy checkpoint with grackle_pinn.evaluate (free rollout). Submit with account/QOS chosen per TASKS.md 3.2.
+#SBATCH --job-name=EvalLegacy
+#SBATCH --time=02:00:00
+#SBATCH --gres=gpu:1
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G
+#SBATCH --partition=gpu
+#SBATCH --output=results/logs/evaluate_legacy_%j.log
+
+cd "$SLURM_SUBMIT_DIR"
+source /home/sarro/venvs/grackle-pinn/bin/activate
+for f in results/legacy/PINN_*.pth; do
+  b=$(basename "$f" .pth); label="legacy_${b#PINN_}"
+  python -m grackle_pinn.evaluate run --ckpt "$f" --label "$label" --set report --plot
+  python -m grackle_pinn.evaluate run --ckpt "$f" --label "$label" --set report --dtype float32
+  python -m grackle_pinn.evaluate run --ckpt "$f" --label "$label" --set grid --max-per-family 25
+done

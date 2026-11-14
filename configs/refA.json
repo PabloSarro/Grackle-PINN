@@ -1,0 +1,2 @@
+{"run_name": "REF-A", "train_path": "data/datasets/refA_train.npz", "valid_path": "data/datasets/refA_valid.npz",
+ "max_runtime_hours": 23.5, "batch_size": 8192, "learning_rate": 1e-4, "epochs": 900, "weight_factor": 20.0}

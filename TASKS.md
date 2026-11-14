@@ -114,6 +114,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 - Keep only the account/QOS pairs that allow the job (wall time, GPU count, job-count limits).
 - Among those, pick the highest QOS priority, then the highest `FairShare` (the account with the least recent usage relative to its share).
 - Write the chosen account, QOS and the fair-share values in the run registry entry (section 8).
+- **[measured, 2026-11-14]** QOS `cs-302` and `math-454` allow 1 running job per user (5 submitted); a second job under the same QOS stays pending (`QOSMaxJobsPerUserLimit`). Two simultaneous runs therefore use different accounts.
 - With today's numbers: smoke tests under 1 h use QOS `debug`; training up to 24 h uses account `cs-302` with QOS `cs-302` (at most 5 jobs at once); a sixth simultaneous job or anything over 24 h falls back to `normal` on the best remaining account (`master` for more than 1 day). Wall time is capped at 72 h (section 2).
 
 ### 3.3 Storage
@@ -251,6 +252,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - `results/baseline.md` has the "as reported" and legacy rows; the `REF-A`/`REF-B` rows and the figure-layout regeneration (Figs. 3 to 9; `--plot` writes one 3-panel rollout figure per trajectory) are pending. The reference runs wait for A3, as planned in the Order line.
   - Metric definitions are in the header of `results/baseline.md`. Energy increase uses e proportional to T (nHI + 2 nHII) / nH at fixed nH, threshold 1e-12 relative per step; the ground truth gives 0.
 - Log:
+  - 2026-11-14 | Submitted the reference runs `REF-A` (job 3252215) and `REF-B` (job 3252217) on the A3 data | see section 8.2 | both running; `REF-B` first went pending under `cs-302` (1 running job per user), resubmitted under `math-454` | scoring with `evaluate.py` when they finish.
   - 2026-11-14 | Harness written: batched float64 free rollout in log space (no exp until metrics), per-trajectory and per-family metrics, teacher-forced one-step RMS by decade of the true |d ln T| stored as diagnostics | `grackle_pinn/evaluate.py` | runs end-to-end | CPU login node too loaded (load 35) for tests, so all runs go through Slurm.
   - 2026-11-14 | Scored all 14 legacy checkpoints on the report set (float64, float32) and on 50 grid trajectories (float64) | job 3252188, account `cs-302`, QOS `cs-302` (fair-share 0.318), 19 m 55 s, 42 result files in `results/eval/` | see `results/baseline.md`; on the report set the best are `legacy_modelB_long` (T median 0.080 dex, final 0.162 dex, nHI/nHII final 0.023/0.041) and `legacy_BEST_noClamp_Long` (0.092, 0.248); the worst are `legacy_modelB`/`BEST_modelB` (final T 15 and 8.6 dex), `legacy_1` on Family 0 (final T 225 dex) and the `fam3` runs (0.6 to 1.8 dex median) | confirms the baseline can now be measured.
   - 2026-11-14 | Consequence for model identity | `legacy_modelB_long` on Family 3: T final 0.127 dex, against about 2 dex for Model B in the report | the June checkpoint named `modelB_long` is not the report's Model B, as stated in section 2; the need for `REF-A`/`REF-B` stands.
@@ -450,7 +452,9 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 
 ### 8.2 New runs
 - Entry format: `run id | date | task | data | config | account, QOS, fair-share at submission, job id | status | key metrics | verdict`.
-- None yet.
+- `REF-A` | 2026-11-14 | A2 | `refA_train.npz` (25.0M pairs, 1,000 files), valid `refA_valid.npz` (300) | `configs/refA.json`: 12 x 512 tanh, float64, batch 8192, lr 1e-4, weight factor 20, mass ramp 1e7 x epoch/899, 900 epochs, stop at 23.5 h | account `cs-302`, QOS `cs-302`, fair-share 0.261 (env540 0.325, math-454 0.180, master 0.024), job 3252215 | running (started 17:37) | - | -
+- `REF-B` | 2026-11-14 | A2 | `refB_train.npz` (20.0M pairs, 800 files), valid `refB_valid.npz` (200) | `configs/refB.json`, same as REF-A | account `math-454`, QOS `math-454`, fair-share 0.180, job 3252217 | running (started 17:38) | - | -
+- Configuration choice: the report's nominal 10,000 epochs would again leave the mass-loss ramp under 10% of its maximum (R2); 900 epochs fit the 24 h wall time (June: 72 to 89 s per epoch), so the ramp reaches its full 1e7. This is the only deviation from the report configuration. The checkpoints keep being chosen on one-step validation MSE until A6.
 
 ## 9. Open questions
 

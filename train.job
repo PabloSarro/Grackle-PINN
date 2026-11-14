@@ -1,0 +1,23 @@
+#!/bin/bash
+#SBATCH --job-name=Fam3Long
+
+#SBATCH --time=12:00:00
+
+#SBATCH --gres=gpu:1
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=32G
+
+#SBATCH --account=env540
+#SBATCH --qos=normal
+#SBATCH --partition=gpu
+
+#SBATCH --output=train_fam3.log
+
+source EnvPablo/bin/activate
+
+echo "Starting PINN training at $(date)"
+python train.py
+echo "Training finished at $(date)"
+# python visualise.py

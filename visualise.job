@@ -1,0 +1,24 @@
+#!/bin/bash
+#SBATCH --job-name=VisPlots
+
+#SBATCH --account=env540
+#SBATCH --qos=normal
+#SBATCH --partition=gpu
+
+#SBATCH --time=00:05:00
+
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --gres=gpu:1
+#SBATCH --mem=16G
+
+#SBATCH --output=visualise.out
+#SBATCH --error=visualise.err
+
+
+source EnvPablo/bin/activate
+
+echo "Starting PINN visualisation at $(date)"
+python visualise.py Plot_Files modelB_long
+echo "Visualisation finished at $(date)"

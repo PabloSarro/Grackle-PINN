@@ -24,7 +24,7 @@ def run_simulation(task_id, t0, n0, x0, output_dir):
 
 def main():
     param_file = "params.txt"
-    output_dir = "Grackle_100yr_3"
+    output_dir = "../Active_Files/"
     
     # 1. Ensure the output directory exists
     os.makedirs(output_dir, exist_ok=True)

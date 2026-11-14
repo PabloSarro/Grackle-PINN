@@ -8,7 +8,7 @@ import os
 m_H = 1.6726219e-24  # Hydrogen Mass
 
 class GrackleDataset(Dataset):
-    def __init__(self, folder_path, pattern="output_*.dat"):
+    def __init__(self, folder_path, pattern="output_*.dat", in_mean=None, in_std=None, tg_mean=None, tg_std=None):
         """
         Load multiple Grackle simulations (will be our inputs).
         PINN's input  (x): [log(y(t))] (and standardised), for y = T, nHI, nHII
@@ -27,12 +27,8 @@ class GrackleDataset(Dataset):
             
             # Extract the data
             data = pd.read_csv(f, comment='#', sep='\s+', header=None)
-
-            # // ---- Inputs [dt, log(T(t)), log(nHI(t)), log(nHII(t))] for every timestep ---- \\
-            # // ---- Targets [log(T(t+dt)/T(t)), log(nHI(t+dt)/nHI(t)), log(nHII(t+dt)/nHII(t))] for every timestep ---- \\
-            
-            # Extract its state vectors, and convert to physical units
-            # dt = data.iloc[1:, 2].values.astype(np.float64) # Vector of dt's (ignoring the initial dt)
+ 
+            # Extract its state vectors
             T = data.iloc[:, 3].values.astype(np.float64)
             nHI = data.iloc[:, 6].values.astype(np.float64)
             nHII = data.iloc[:, 7].values.astype(np.float64)
@@ -49,7 +45,7 @@ class GrackleDataset(Dataset):
             nHII_next = nHII[1:]       # nHII(t+dt)
             nHII_targ = np.log(nHII_next)-np.log(nHII_curr)  # log(nHII(t+dt)/nHII(t))
 
-            # Stack into (N, 4) and (N, 3), respectively.
+            # Stack into (N, 3) and (N, 3).
             inputs = np.stack([np.log(T_curr), np.log(nHI_curr), np.log(nHII_curr)], axis=1)
             targets = np.stack([T_targ, nHI_targ, nHII_targ], axis=1)
 
@@ -59,22 +55,20 @@ class GrackleDataset(Dataset):
         self.all_inputs = torch.from_numpy(np.concatenate(self.all_inputs, axis=0)).to(torch.get_default_dtype()) # To choose either 32 or 64-bit arithmetic.
         self.all_targets = torch.from_numpy(np.concatenate(self.all_targets, axis=0)).to(torch.get_default_dtype())
 
-        print("Pre-normalising inputs and targets...")        
-        # No need to normalise time.
-        #   self.dt_min = dt.min()
-        #   self.dt_max = dt.max()
-        self.in_mean = self.all_inputs.mean(dim=0)
-        self.in_std = self.all_inputs.std(dim=0)
+        print("Pre-normalising inputs and targets...")
+        # If parameters are not provided, compute them (done for the Training set)
+        if in_mean is None:
+            self.in_mean = self.all_inputs.mean(dim=0)
+            self.in_std = self.all_inputs.std(dim=0)
 
-        self.tg_mean = self.all_targets.mean(dim=0)
-        self.tg_std = self.all_targets.std(dim=0)
-
-        print("\n--- SCALING (MINS/MAXS) ---")
-        print("inputs_mean:", self.in_mean)
-        print("inputs_std:", self.in_std)
-        print("targets_mean:", self.tg_mean)
-        print("targets_std:", self.tg_std)
-        print("--- END SCALING ---\n")
+            self.tg_mean = self.all_targets.mean(dim=0)
+            self.tg_std = self.all_targets.std(dim=0)
+        # Otherwise, use them directly (done for the Validation set)
+        else:
+            self.in_mean = in_mean
+            self.in_std = in_std
+            self.tg_mean = tg_mean
+            self.tg_std = tg_std
 
         self.all_inputs = (self.all_inputs - self.in_mean) / (self.in_std + 1e-8)
         self.all_targets = (self.all_targets - self.tg_mean) / (self.tg_std + 1e-8)
@@ -98,20 +92,3 @@ def DEBUG_helper(name, t, min_val=1e-10, max_val=1e10):
     #     print(f"[!] WARNING: '{name}' is too large! Max: {t.max():.2e}")
     # elif t.min() < min_val:
     #     print(f"[!] WARNING: '{name}' is too small! Min: {t.min():.2e}")
-
-
-# Test block
-if __name__ == "__main__":
-    # Make sure you have output_1.dat and output_2.dat in the current folder before running this test
-    try:
-        ds = GrackleDataset(folder_path=".")
-        print(f"✓ Dataset multi-file loaded: {len(ds)} total data points.")
-        
-        x, y = ds[0]
-        print(f"✓ Example of input (T0, nHI0, nHII0): {x.numpy()}")
-        print(f"✓ Example of output  (T1/T0, nHI1/nHI0, nHII1/nHII0): {y.numpy()}")
-        
-        if x.shape[0] != 3:
-            print("✗ Error: The input dimension should be 3.")
-    except Exception as e:
-        print(f"✗ Error: {e}")

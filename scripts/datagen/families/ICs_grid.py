@@ -16,7 +16,8 @@ n_grid = np.arange(n_min, n_max + step, step)
 x_grid = [1e-4, 1e-2, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99, 0.9999]
 
 # Define the Scratch output directory
-out_dir = "/scratch/izar/sarro/Grid_Analysis"
+import sys
+out_dir = sys.argv[1] if len(sys.argv) > 1 else "configs/ics"
 os.makedirs(out_dir, exist_ok=True)
 param_file = os.path.join(out_dir, "ICs_grid.txt")
 

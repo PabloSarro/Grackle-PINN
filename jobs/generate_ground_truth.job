@@ -1,0 +1,22 @@
+#!/bin/bash
+# Regenerates all ground-truth trajectories on scratch with the A3 driver.
+# Submit with account/QOS chosen per TASKS.md section 3.2.
+#SBATCH --job-name=GenGT
+#SBATCH --time=06:00:00
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=30
+#SBATCH --mem=16G
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:1
+#SBATCH --output=results/logs/generate_ground_truth_%j.log
+
+cd "$SLURM_SUBMIT_DIR"
+source /home/sarro/venvs/grackle-pinn/bin/activate
+export GRACKLE_DRIVER=scripts/datagen/cooling-full-integration-100yr
+OUT=/scratch/izar/sarro/ground_truth
+for set in report8 balanced_valid balanced_train grid random15000; do
+  echo "== $set $(date)"
+  python scripts/datagen/families/generate_data.py configs/ics/$set.txt $OUT/$set
+done
+echo "done $(date)"

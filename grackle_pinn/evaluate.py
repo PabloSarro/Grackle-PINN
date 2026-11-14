@@ -119,6 +119,32 @@ def grid_set(grid_dir="data/families/Grid_Files", family_csv=DEFAULT_FAMILY_CSV,
     return items
 
 
+def family_oracle(family_csv=DEFAULT_FAMILY_CSV):
+    """kNN (k=3) on the initial (ln T, ln nHI, ln nHII) trained on the grid families, as in the report."""
+    from sklearn.neighbors import KNeighborsClassifier
+    df = pd.read_csv(family_csv)
+    knn = KNeighborsClassifier(n_neighbors=3)
+    knn.fit(df[["T_0(log)", "nHI_0(log)", "nHII_0(log)"]].values, df["Family_ID"].values)
+    return knn
+
+
+def npz_set(path, max_per_family=None, seed=0):
+    """Trajectories from a compact .npz (build_datasets.py). Family from the kNN oracle on the initial state.
+    Returns (name, family, log-state array) items."""
+    z = np.load(path)
+    ls, names = z["logstate"], z["names"]
+    knn = family_oracle()
+    fam = knn.predict(ls[:, 0] / LN10)       # the oracle works on log10 values
+    rng = np.random.default_rng(seed)
+    idx = []
+    for f in sorted(set(fam)):
+        ii = np.where(fam == f)[0]
+        if max_per_family and len(ii) > max_per_family:
+            ii = np.sort(rng.choice(ii, max_per_family, replace=False))
+        idx += list(ii)
+    return [(str(names[i]), int(fam[i]), ls[i]) for i in idx]
+
+
 # --------------------------------------------------------------------------- metrics
 @np.errstate(all="ignore")
 def specific_energy(logs):
@@ -195,7 +221,7 @@ def evaluate(ckpt, scaling, items, device, dtype, label, set_name, max_steps=Non
     model, sc, info = load_model(ckpt, scaling, device, dtype)
     trajs = {}
     for name, fam, path in items:
-        tr = load_trajectory(path)
+        tr = load_trajectory(path) if isinstance(path, str) else path
         if max_steps:
             tr = tr[: max_steps + 1]
         trajs[name] = (fam, tr)
@@ -270,7 +296,7 @@ def main():
     r = sub.add_parser("run")
     r.add_argument("--ckpt", required=True)
     r.add_argument("--scaling", default=None)
-    r.add_argument("--set", choices=["report", "grid"], default="report")
+    r.add_argument("--set", default="report", help="report | grid | npz:<file.npz> (label of the set = file stem)")
     r.add_argument("--label", required=True)
     r.add_argument("--dtype", choices=["float64", "float32"], default="float64")
     r.add_argument("--max-per-family", type=int, default=None)
@@ -286,7 +312,13 @@ def main():
         return
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = getattr(torch, args.dtype)
-    items = report_set() if args.set == "report" else grid_set(max_per_family=args.max_per_family)
+    if args.set == "report":
+        items = report_set()
+    elif args.set == "grid":
+        items = grid_set(max_per_family=args.max_per_family)
+    else:
+        items = npz_set(args.set[4:], args.max_per_family)
+        args.set = os.path.splitext(os.path.basename(args.set))[0]
     res = evaluate(args.ckpt, args.scaling, items, device, dtype, args.label, args.set, args.max_steps,
                    os.path.join(args.out_dir, "plots") if args.plot else None)
     os.makedirs(args.out_dir, exist_ok=True)

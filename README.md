@@ -26,7 +26,13 @@ python3 -m venv ~/venvs/grackle-pinn
 
 ## Data generation
 
-The Grackle driver `scripts/datagen/cooling-full-integration-100yr.c` is built against the Grackle install of the `Lessandre` project (see `TASKS.md`, task A3, which also rebuilds the datasets). Initial conditions: `python scripts/datagen/params.py`, then `sbatch scripts/datagen/generate_data.sh`.
+```bash
+bash scripts/datagen/build_driver.sh                      # builds the Grackle driver (needs ../../Lessandre/grackle-install)
+sbatch --account=<acc> --qos=<qos> jobs/generate_ground_truth.job   # 22,633 trajectories to /scratch/izar/sarro/ground_truth (about 5 min on 30 cores)
+sbatch --account=<acc> --qos=<qos> jobs/build_datasets.job          # checks them and writes data/datasets/*.npz (REF-A, REF-B, report8)
+```
+
+Initial-condition lists are in `configs/ics/` (`grid` 5,625, `balanced_train`/`balanced_valid` 800/200, `random15000`, `report8`); `scripts/datagen/families/ICs_grid.py` regenerates the grid list. The REF-A selection is in `configs/datasets/refA_selection.json`. Training reads the `.npz` files (`train_path`/`valid_path` in a config may be a `.npz`).
 
 ## Training
 

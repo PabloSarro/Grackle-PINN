@@ -399,11 +399,11 @@ void write_my_setup(FILE *fd, grackle_field_data grackle_fields,
 void write_header(FILE *fd) {
 
   fprintf(fd,
-          "#%8s %15s %15s %15s %15s %15s %15s %15s %15s %15s %15s %15s %15s\n",
+          "#%8s %15s %15s %15s %15s %15s %15s %15s %15s %15s %15s %15s %15s %25s\n",
           "step", "Time [yr]", "       dt [yr]    ", "   Temperature [K]    ", "       Mean Mol Wgt      ",
           "      Tot dens [cm^-3]      ", "    HI dens [cm^-3]     ", "     HII dens [cm^-3]    ", "    HeI dens [cm^-3]    ",
           "     HeII dens [cm^-3]    ", "   HeIII dens [cm^-3]     ", "    e- dens [cm^-3]    ",
-          "IntrnEnerg [erg/g=cm^2/s^2]");
+          "IntrnEnerg [erg/g=cm^2/s^2]", "x = nHII/(nHI+nHII)");
 }
 
 /**
@@ -438,7 +438,7 @@ void write_timestep(FILE *fd, grackle_field_data *grackle_fields,
 
   fprintf(fd,  
           // Show more decimal places, for higher numerical precision
-          "%9d %15.5e %15.3e %25.16e %25.16e %25.16e %25.16e %25.16e %25.16e %25.16e %25.16e %25.16e %25.16e\n",
+          "%9d %25.16e %15.10e %25.16e %25.16e %25.16e %25.16e %25.16e %25.16e %25.16e %25.16e %25.16e %25.16e %25.16e\n",
           step, t / const_yr * time_units, dt / const_yr * time_units,
           temperature[field_index], mu[field_index],
           grackle_fields->density[field_index] * grackle_units_data->density_units / const_mh,
@@ -448,7 +448,9 @@ void write_timestep(FILE *fd, grackle_field_data *grackle_fields,
           grackle_fields->HeII_density[field_index] * grackle_units_data->density_units / const_mh,
           grackle_fields->HeIII_density[field_index] * grackle_units_data->density_units / const_mh,
           grackle_fields->e_density[field_index] * grackle_units_data->density_units / const_mh,
-          grackle_fields->internal_energy[field_index] * grackle_units_data->velocity_units * grackle_units_data->velocity_units);
+          grackle_fields->internal_energy[field_index] * grackle_units_data->velocity_units * grackle_units_data->velocity_units,
+          grackle_fields->HII_density[field_index] /
+              (grackle_fields->HI_density[field_index] + grackle_fields->HII_density[field_index]));
 }
 
 
@@ -506,7 +508,7 @@ int main(int argc, char *argv[]) {
   /* -------------------------- */
 
   double dt_max_cool = 1e2; /* upper limit for time during cooling, in yr.    normaly 1e2 */
-  double dt_max_heat = 10.; /* upper limit for time during heating, in yr.    normally 10. */
+  double dt_max_heat = 100.; /* upper limit for time during heating, in yr.    normally 10. */
   double dt_init = 9.549e+04;   /* max dt while heating. in yr. Will be converted later */
   double tinit = 0;     /* in yr; will be converted later */
   double tend = 2.5e6;      /* in yr; will be converted later */
@@ -694,7 +696,10 @@ int main(int argc, char *argv[]) {
   double dt = dt_init;
   double dt_use;
   double tol = 1e-7*const_yr/time_units;
-  while (t < tend) {
+  /* Output times are exact multiples of dt_sample; every sub-step is clipped so that it lands on them. */
+  long n_sample = 1;
+  tol = 1e-9 * dt_sample;
+  while (t < tend - tol) {
 
     /* Set up radiation fields, and compute the resulting interaction
      * rates depending on the simulation time. */
@@ -703,19 +708,7 @@ int main(int argc, char *argv[]) {
 
     dt_use = fmin(dt, dt_max_cool);
 
-    if (t / const_yr * time_units < 0.5e6) {
-    //if (t / const_yr * time_units < 0.5e10) {
-      /* below 0.5 Myr, we heat. */
-
-      //iact_rates[0] = 1.65117e-17;                /* heating rate          */
-      //iact_rates[1] = 5.03133e+13;                /* HI-ionization rate    */    
-
-      iact_rates[0] = 0;                /* heating rate          */
-      iact_rates[1] = 0;                /* HI-ionization rate    */   
-
-      dt_use = fmin(dt, dt_max_heat);
-    }
-
+    /* Same scheme at all times (no 0.5 Myr switch, no radiation). */
     /* Increase timestep size */
     dt *= 1.001;
 
@@ -738,7 +731,14 @@ int main(int argc, char *argv[]) {
     }
     dt_use = fmin(0.1 * fabs(tchem_time), dt_use);
 
+    t_next_sample = n_sample * dt_sample;
+    int lands = 0;
+    if (t + dt_use >= t_next_sample - tol) { /* clip the sub-step to land exactly on the output time */
+      dt_use = t_next_sample - t;
+      lands = 1;
+    }
     t += dt_use;
+    if (lands) t = t_next_sample;
     step += 1;
 
     if (local_solve_chemistry(&grackle_chemistry_data, &grackle_rates,
@@ -752,12 +752,11 @@ int main(int argc, char *argv[]) {
     //               &grackle_chemistry_data, /*field_index=*/0, t, dt_use,
     //               time_units, step);
 
-    if (t+tol >= t_next_sample) { // Output to file every dt=100 yr.
+    if (lands) { /* output every dt_sample = 100 yr, exactly */
       write_timestep(fd, &grackle_fields, &grackle_units_data,
                      &grackle_chemistry_data, 0, t, dt_sample,
                      time_units, step);
-
-      t_next_sample += dt_sample;
+      n_sample += 1;
     }
   }
 

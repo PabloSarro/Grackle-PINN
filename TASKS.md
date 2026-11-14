@@ -35,7 +35,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 - Quick wins
   - `[~]` A1 Simplify the repository structure
   - `[~]` A2 Evaluation harness and numeric baseline
-  - `[-]` A3 Clean ground-truth generation and dataset rebuild
+  - `[X]` A3 Clean ground-truth generation and dataset rebuild
   - `[-]` A4 State variables with built-in constraints
   - `[-]` A5 Target and loss that resolve the flat regime
   - `[-]` A6 Training-loop fixes
@@ -49,7 +49,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - `[-]` B7 Training-set sampling strategies
 - Deliverable
   - `[-]` C1 Updated report
-- Next task to start: **A3** (after Pablo's go-ahead). A2 is waiting only for the regenerated data and the two reference runs; A1 is done apart from its listed deviations.
+- Next step: the two reference runs `REF-A`, `REF-B` (finish A2), then A4 (after Pablo's go-ahead). A1 is done apart from its listed deviations.
 
 ## 1. Baseline: what the report states
 
@@ -257,19 +257,31 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - 2026-11-14 | Precision check (R2 finding) | float32 vs float64 rollouts of the same 14 checkpoints on the report set (8 trajectories) | the median T error changes by under 8% for 12 of 14 checkpoints (ratios 0.92 to 1.07) and by x1.70 (`legacy_modelB`) and x0.67 (`legacy_modelB_long`) for the other two; the T error at 2.5 Myr changes by x0.44 to x1.5 for `legacy_modelB_long`, `legacy_BEST_noClamp_Long` and `legacy_modelB`, and by under 10% for the rest | float32 is not a first-order effect but moves some single rollouts by about a factor 2 in either direction; keep float64 for all numbers.
   - 2026-11-14 | Energy monotonicity | last column of `results/baseline.md`, report set, float64 | fraction of steps with increasing energy (truth: 0) is 0.002 to 0.005 for the two `fam3_long` checkpoints and `legacy_noClamp_Long`, 0.07 for `legacy_BEST_noClamp_Long`, and 0.17 to 0.86 for the rest | most checkpoints violate energy monotonicity on a large fraction of steps, which supports testing P2 and P3 in B3.
 
-### A3. Clean ground-truth generation and dataset rebuild `[-]`
+### A3. Clean ground-truth generation and dataset rebuild `[X]`
 - Goal: all datasets regenerated (the June scratch copies are gone), with rows exactly 100 yr apart, one integration scheme at all times, full precision and a fast format.
 - Why: R3. Timing jitter up to about 40% at the cliff bounds how well any fixed-step model can fit the cliff (Fig. 6 timing error). Regeneration is needed in any case.
 - Steps:
-  - `[-]` Driver (change allowed, section 2): clip the last sub-step to land exactly on each output time; drop the 0.5 Myr switch; write the true interval in the `dt` column; print time at full precision; write internal energy and x directly. Rebuild against `../../Lessandre/grackle-install`.
-  - `[-]` Check the new driver against the old one on the 8 report-figure ICs (differences expected only near the cliff and at the 1e-3 level elsewhere).
-  - `[-]` Generate on scratch: the 5,625-point family grid (the IC list in the repo has only 507 lines, so the full grid is rebuilt from Table 3 of the report), the 1,000 balanced ICs (`Families/ICs_train.txt`, `ICs_valid.txt`), the 15,000 random ICs (`create_Grackle/params.txt`), the 8 report-figure ICs.
-  - `[-]` Re-implement the variance-stratified selection from the report (score each file by the summed log-space variance of its increments; 800 most active, 250 moderate, 250 flat; split 700/150/150 train and 100/100/100 validation). The exact June boundaries between "moderate" and "flat" are not recorded, so the choice made is written in the Log.
-  - `[-]` Re-run the family clustering and kNN oracle on the new grid only if the balanced IC lists need to change; otherwise reuse `Trajectory_Families.csv`.
-  - `[-]` Convert selected datasets to `.npz` (float64) under `/home` (section 3.3) and load those in training.
+  - `[X]` Driver (change allowed, section 2): clip the last sub-step to land exactly on each output time; drop the 0.5 Myr switch; write the true interval in the `dt` column; print time at full precision; write internal energy and x directly. Rebuild against `../../Lessandre/grackle-install`.
+  - `[X]` Check the new driver against the old one on the 8 report-figure ICs (differences expected only near the cliff and at the 1e-3 level elsewhere).
+  - `[X]` Generate on scratch: the 5,625-point family grid (the IC list in the repo has only 507 lines, so the full grid is rebuilt from Table 3 of the report), the 1,000 balanced ICs (`Families/ICs_train.txt`, `ICs_valid.txt`), the 15,000 random ICs (`create_Grackle/params.txt`), the 8 report-figure ICs.
+  - `[X]` Re-implement the variance-stratified selection from the report (score each file by the summed log-space variance of its increments; 800 most active, 250 moderate, 250 flat; split 700/150/150 train and 100/100/100 validation). The exact June boundaries between "moderate" and "flat" are not recorded, so the choice made is written in the Log.
+  - `[X]` Re-run the family clustering and kNN oracle on the new grid only if the balanced IC lists need to change; otherwise reuse `Trajectory_Families.csv`.
+  - `[X]` Convert selected datasets to `.npz` (float64) under `/home` (section 3.3) and load those in training.
 - Effort: 1 to 2 days plus CPU jobs (May: 1,000 trajectories in under an hour on 16 cores, so about 22,600 trajectories need roughly 10 to 25 node-hours).
 - Success: all row intervals equal 100 yr to 1e-6 yr; dataset load time from minutes to seconds; datasets for `REF-A` and `REF-B` have the point counts of the report (25.0M and 20.0M) to within 1%.
-- Log: none yet.
+- Outcome:
+  - Driver `scripts/datagen/cooling-full-integration-100yr.c`: each sub-step is clipped to land on a multiple of 100 yr, one scheme at all times (cap 100 yr, no 0.5 Myr switch), time written with 17 digits, `dt` column is the true interval, new last column x = nHII/(nHI+nHII). Build: `scripts/datagen/build_driver.sh`.
+  - All 22,633 trajectories (grid 5,625; balanced 800 + 200; random 15,000; report8) have 25,001 rows, spacing 100 yr to 4.7e-10 yr, nHI + nHII constant to 1.1e-15 relative, specific energy never increasing (0 rows), x column equal to nHII/nH to 4.4e-16 **[measured]**.
+  - Generation takes 4 m 32 s on 30 cores (the June estimate was 10 to 25 node-hours); data are on `/scratch/izar/sarro/ground_truth/` (171 GB, purgeable); IC lists in `configs/ics/`, everything else regenerable by the scripts.
+  - Datasets in `data/datasets/`: `refB_train` (800 files, 20.0M pairs), `refB_valid` (200), `refA_train` (1,000 files, 25.0M pairs), `refA_valid` (300), `report8`. Load time of `refA_train` 7 s. Pairs are identical to those of the text loader (max difference 0.0 on `Valid_Fam_3`).
+  - REF-A selection rule written to `configs/datasets/refA_selection.json`: file score = sum over T, nHI, nHII of Var[d ln y]; the 800 highest-scoring files are "active" (score 0.0137 to 0.0183); "moderate" = 250 random among ranks 801 to 4000; "flat" = 250 random among ranks 4001 to 15000 (scores to 1.8e-30); seed 0; train 700/150/150, validation 100/100/100. The June boundaries were not recorded, so this is a stand-in.
+- Log:
+  - 2026-11-14 | Built the old driver (tag `report-june2026`) as reference and modified the driver | `results/old_driver`, new `.c` | both link against `Lessandre/grackle-install` with the spack HDF5 and gfortran libraries | `build_driver.sh`.
+  - 2026-11-14 | Old vs new driver on the 8 report-figure ICs, new interpolated to the old output times | `scripts/datagen/compare_drivers.py` | max |d ln| in T, nHI, nHII: Fam 1 train 1.4e-6, 1.3e-5, 1.3e-5; Fam 1 valid 1.1e-6, 5e-6, 1.6e-5; Fam 2 train 6e-3, 5e-3, 1.1e-2; Fam 2 valid 4e-4, 1e-4, 6e-4; Fam 0 train 5e-4, 8e-2, 1e-3; Fam 0 valid 6e-5, 4e-2, 1e-4; Fam 3 train 6e-2, 0.31, 6e-3; Fam 3 valid 3.5e-3, 1.6e-2, 3e-4 | large differences only at the Family 3 cliff (timing jitter of the old rows, 72 to 142 yr between rows) and in nHI of the almost fully ionised Family 0 trajectories (nHI tiny, relative differences large); elsewhere 1e-6 to 1e-2 | new driver accepted.
+  - 2026-11-14 | Generated the ground truth | job 3252211, account `cs-302`, QOS `cs-302` (fair-share 0.284 vs 0.325 for `env540`; QOS priority decides), 30 cores | 22,633 of 22,633 trajectories in 4 m 32 s | OK.
+  - 2026-11-14 | Checked and converted | job 3252212 (same account), `check_ground_truth.py` + `build_datasets.py`, 2 m 37 s | all checks above passed | datasets built.
+  - 2026-11-14 | Family labels | the grid ICs and their order are unchanged, so `Trajectory_Families.csv` (family per grid file) is reused; the kNN oracle (k = 3, report) labels the validation files | not re-clustered on the new trajectories | OK.
+
 
 ### A4. State variables with built-in constraints `[-]`
 - Goal: the network predicts in (internal energy, ionised fraction x) with nH carried through unchanged, as one of the ways of imposing physics.

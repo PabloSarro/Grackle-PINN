@@ -17,10 +17,16 @@ class GrackleDataset(Dataset):
         self.all_inputs = []
         self.all_targets = []
         
-        # Search for all files that match the pattern
-        files = glob.glob(os.path.join(folder_path, pattern))
-        if not files:
-            raise FileNotFoundError(f"No files found matching the pattern {pattern} in {folder_path}")
+        if str(folder_path).endswith(".npz"):
+            # Compact format (A3): logstate (n_traj, n_rows, 3) = ln [T, nHI, nHII]; adjacent rows form one step.
+            ls = np.load(folder_path)["logstate"]
+            self.all_inputs = [ls[:, :-1].reshape(-1, 3)]
+            self.all_targets = [np.diff(ls, axis=1).reshape(-1, 3)]
+            files = []
+        else:
+            files = glob.glob(os.path.join(folder_path, pattern))
+            if not files:
+                raise FileNotFoundError(f"No files found matching the pattern {pattern} in {folder_path}")
 
         # For each file
         for f in files:

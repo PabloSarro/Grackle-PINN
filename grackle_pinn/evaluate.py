@@ -196,11 +196,14 @@ def trajectory_metrics(truth, pred):
         m[f"{name}_final"] = float(err[-1, j])
 
     dT_true, dT_pred = np.diff(truth[:, 0]), np.diff(pred[:, 0])
-    # cliff time = first row whose |d ln T| exceeds the threshold (A2 definition, 2026-11-16; the earlier argmax
-    # definition returned row 0 for trajectories that start already cooling fast)
-    first = lambda d: int(np.argmax(np.abs(d) > CLIFF_THRESHOLD)) if (np.abs(d) > CLIFF_THRESHOLD).any() else None
-    i_true = first(dT_true)
-    i_pred = first(dT_pred) if np.isfinite(dT_pred).all() else None
+    # cliff time = row of the largest |d ln T| after the first step, if it exceeds the threshold (A2 definition of
+    # 2026-11-16). The first step is excluded: Family 3 starts with a one-step relaxation (|d ln T| up to 0.35 in the
+    # report set) that is not the cooling cliff; "first row above the threshold" and "global argmax" both picked it.
+    def steepest(d):
+        d = np.abs(d[1:])
+        return int(np.argmax(d)) + 1 if d.size and d.max() > CLIFF_THRESHOLD else None
+    i_true = steepest(dT_true)
+    i_pred = steepest(dT_pred) if np.isfinite(dT_pred).all() else None
     m["has_cliff"] = i_true is not None
     if m["has_cliff"]:
         pred_has = i_pred is not None

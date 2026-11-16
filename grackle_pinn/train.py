@@ -30,6 +30,8 @@ DEFAULTS = dict(
     hidden_dim=512, hidden_layers=12, parameterisation="report",
     batch_size=8192, learning_rate=1.0e-4, epochs=900, check_every=10,
     weight_factor=10.0, lambda_mass_max=1.0e7, ramp_fraction=1.0,
+    phys_weight=0.0,          # A5: weight of an extra MSE on the physical increments (d ln e, d logit x), each divided by its std
+    weight_physical=False,    # A5: the 1 + weight_factor |y| weight uses the standardised physical increment instead of the training target
     legacy_resume_epoch=None,                         # only for a checkpoint of the June loop (no epoch stored): epochs already done
     max_runtime_hours=23.5, budget_hours=None,        # None: ramp follows optimiser steps only; a number: also follows that wall-clock budget
     scheduler_patience=5, scheduler_factor=0.5, min_lr=1e-6, grad_clip=50.0,
@@ -130,6 +132,14 @@ def main():
             best_score, resumed = float(ckpt.get("best_loss", float("inf"))), True
         print(f"[✓] loaded {args.model}; resumed={resumed}, start epoch {start_epoch}, step {step}", flush=True)
 
+    use_phys = cfg["phys_weight"] > 0 or cfg["weight_physical"]
+    if use_phys:                       # physical increments of the training pairs and their std (constrained and lograte only)
+        with torch.no_grad():
+            P = torch.cat([param.to_physical(Y[i:i + (1 << 22)], sc) for i in range(0, N, 1 << 22)])
+            p_std = P.std(dim=0)
+            del P
+        print(f"physical increment std {p_std.tolist()}", flush=True)
+
     phys = PhysicsLossManager(model, sc["in_mean"], sc["in_std"], sc["tg_mean"], sc["tg_std"])
     arch = {"hidden_dim": cfg["hidden_dim"], "hidden_layers": cfg["hidden_layers"],
             "input_dim": param.in_dim, "output_dim": param.out_dim}
@@ -166,9 +176,17 @@ def main():
             idx = perm[i:i + BS]
             bx, by = X[idx], Y[idx]
             optimiser.zero_grad()
-            pred = param.to_standardised(model(bx), sc)
-            w = 1.0 + cfg["weight_factor"] * torch.abs(by)
+            out_raw = model(bx)
+            pred = param.to_standardised(out_raw, sc)
+            if use_phys:
+                true_p = param.to_physical(by, sc)
+                ys = true_p / p_std if cfg["weight_physical"] else by
+            else:
+                ys = by
+            w = 1.0 + cfg["weight_factor"] * torch.abs(ys)
             loss_data = torch.mean(w * (pred - by) ** 2)
+            if cfg["phys_weight"] > 0:
+                loss_data = loss_data + cfg["phys_weight"] * torch.mean(((param.to_physical(out_raw, sc) - true_p) / p_std) ** 2)
             if param.name == "report":
                 loss_mass = phys.mass_conserv(bx, pred)
                 progress = step / (cfg["ramp_fraction"] * planned_steps)

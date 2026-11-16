@@ -84,22 +84,24 @@ def test_resume_reproduces_uninterrupted():
         base = dict(train_path="data/datasets/report8.npz", valid_path="data/datasets/report8.npz", out_dir=d,
                     hidden_dim=32, hidden_layers=2, epochs=6, check_every=2, batch_size=8192, seed=3,
                     rollout_trajectories=4, rollout_window=100, rollout_starts=[0, 1000], weight_factor=20.0)
-        for param in ("report", "constrained", "lograte"):
+        for param, extra in (("report", {}), ("constrained", {}), ("lograte", {}),
+                             ("lograte", {"phys_weight": 1.0}), ("lograte", {"weight_physical": True, "weight_factor": 20.0})):
+            tagname = param + "".join(sorted(extra)).replace("_", "")
             ws = {}
             for tag, stop in (("full", None), ("part", 3)):
-                cfg = dict(base, run_name=f"{param}_{tag}", parameterisation=param, stop_after_epochs=stop)
+                cfg = dict(base, **extra, run_name=f"{tagname}_{tag}", parameterisation=param, stop_after_epochs=stop)
                 path = os.path.join(d, f"{cfg['run_name']}.json"); json.dump(cfg, open(path, "w"))
                 subprocess.run([sys.executable, "-m", "grackle_pinn.train", "--config", path], check=True, capture_output=True)
-            ck = os.path.join(d, f"{param}_part", f"PINN_{param}_part.pth")
+            ck = os.path.join(d, f"{tagname}_part", f"PINN_{tagname}_part.pth")
             assert torch.load(ck, weights_only=False)["epoch"] == 3
-            cfg = dict(base, run_name=f"{param}_part", parameterisation=param)
+            cfg = dict(base, **extra, run_name=f"{tagname}_part", parameterisation=param)
             path = os.path.join(d, "resume.json"); json.dump(cfg, open(path, "w"))
             subprocess.run([sys.executable, "-m", "grackle_pinn.train", "--config", path, "--model", ck], check=True, capture_output=True)
-            a = torch.load(os.path.join(d, f"{param}_full", f"PINN_{param}_full.pth"), weights_only=False)["model"]
-            b = torch.load(os.path.join(d, f"{param}_part", f"PINN_{param}_part.pth"), weights_only=False)["model"]
+            a = torch.load(os.path.join(d, f"{tagname}_full", f"PINN_{tagname}_full.pth"), weights_only=False)["model"]
+            b = torch.load(os.path.join(d, f"{tagname}_part", f"PINN_{tagname}_part.pth"), weights_only=False)["model"]
             diff = max((a[k] - b[k]).abs().max().item() for k in a)
-            lines = open(os.path.join(d, f"{param}_part", f"losses_{param}_part.txt")).read().strip().splitlines()
-            print(param, "resumed vs uninterrupted: max weight difference", diff, "| loss file lines", len(lines))
+            lines = open(os.path.join(d, f"{tagname}_part", f"losses_{tagname}_part.txt")).read().strip().splitlines()
+            print(tagname, "resumed vs uninterrupted: max weight difference", diff, "| loss file lines", len(lines))
             assert diff == 0.0 and len(lines) == 7      # header + 6 epochs, appended not overwritten
 
 

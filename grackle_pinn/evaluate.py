@@ -196,15 +196,18 @@ def trajectory_metrics(truth, pred):
         m[f"{name}_final"] = float(err[-1, j])
 
     dT_true, dT_pred = np.diff(truth[:, 0]), np.diff(pred[:, 0])
-    i_true = int(np.argmax(np.abs(dT_true)))
-    i_pred = int(np.argmax(np.abs(dT_pred))) if np.isfinite(dT_pred).all() else -1
-    m["has_cliff"] = bool(np.abs(dT_true[i_true]) > CLIFF_THRESHOLD)
+    # cliff time = first row whose |d ln T| exceeds the threshold (A2 definition, 2026-11-16; the earlier argmax
+    # definition returned row 0 for trajectories that start already cooling fast)
+    first = lambda d: int(np.argmax(np.abs(d) > CLIFF_THRESHOLD)) if (np.abs(d) > CLIFF_THRESHOLD).any() else None
+    i_true = first(dT_true)
+    i_pred = first(dT_pred) if np.isfinite(dT_pred).all() else None
+    m["has_cliff"] = i_true is not None
     if m["has_cliff"]:
-        pred_has = np.isfinite(dT_pred).all() and np.abs(dT_pred[i_pred]) > CLIFF_THRESHOLD
+        pred_has = i_pred is not None
         m["cliff_time_true_yr"] = i_true * STEP_YR
         m["cliff_missed"] = not pred_has
         m["cliff_time_error_yr"] = abs(i_pred - i_true) * STEP_YR if pred_has else None
-        m["cliff_time_error_rel"] = abs(i_pred - i_true) / max(i_true, 1) if pred_has else None
+        m["cliff_time_error_rel"] = abs(i_pred - i_true) / i_true if (pred_has and i_true > 0) else None
 
     nH0 = np.log(np.exp(truth[0, 1]) + np.exp(truth[0, 2]))
     nH_pred = np.logaddexp(pred[:, 1], pred[:, 2])

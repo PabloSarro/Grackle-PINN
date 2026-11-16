@@ -1,0 +1,22 @@
+#!/bin/bash
+# Scores the best and the last checkpoint of one run: report set and the 200-trajectory balanced validation set (free rollouts).
+# Usage: sbatch --account=<acc> --qos=<qos> --export=ALL,RUN=<run name> jobs/evaluate_run.job
+#SBATCH --job-name=EvalRun
+#SBATCH --time=06:00:00
+#SBATCH --gres=gpu:1
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=24G
+#SBATCH --partition=gpu
+#SBATCH --output=results/logs/evaluate_%x_%j.log
+: "${RUN:?set RUN=<run name>}"
+cd "$SLURM_SUBMIT_DIR"
+source /home/sarro/venvs/grackle-pinn/bin/activate
+d=results/runs/$RUN
+for kind in BEST last; do
+  if [ $kind = BEST ]; then ck=$d/PINN_BEST_$RUN.pth; else ck=$d/PINN_$RUN.pth; fi
+  label="${RUN}_${kind}"
+  python -m grackle_pinn.evaluate run --ckpt $ck --label $label --set report --plot
+  python -m grackle_pinn.evaluate run --ckpt $ck --label $label --set npz:data/datasets/refB_valid.npz
+done

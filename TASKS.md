@@ -36,7 +36,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - `[~]` A1 Simplify the repository structure
   - `[~]` A2 Evaluation harness and numeric baseline
   - `[X]` A3 Clean ground-truth generation and dataset rebuild
-  - `[~]` A4 State variables with built-in constraints
+  - `[X]` A4 State variables with built-in constraints
   - `[~]` A5 Target and loss that resolve the flat regime
   - `[X]` A6 Training-loop fixes
 - Larger experiments
@@ -49,7 +49,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - `[-]` B7 Training-set sampling strategies
 - Deliverable
   - `[-]` C1 Updated report
-- Next step: wait for `REF-A`, `REF-B`, `A4-C-B` and `A5-L-B`, then score them (A2, A4); the two reference runs `REF-A`, `REF-B` (finish A2), then A4 (after Pablo's go-ahead). A1 is done apart from its listed deviations.
+- Next step: the four runs are scored (2026-11-16). Open decisions for Pablo: resume `REF-A` for its last 148 epochs (A2); what to try for the Family 3 failure of `A5-L-B` (A5); whether to run `A5-L-A`. B3 stays deferred until Pablo confirms. A1 is done apart from its listed deviations.
 
 ## 1. Baseline: what the report states
 
@@ -242,7 +242,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - `[-]` Reference runs with known provenance, report configuration (12 x 512, loss weight 20, soft mass loss ramp), trained through the cleaned pipeline on the data rebuilt in A3:
     - `REF-B`: kNN-balanced dataset from `Families/ICs_train.txt` and `ICs_valid.txt`.
     - `REF-A`: variance-stratified dataset, selection re-implemented from the report (A3).
-  - `[~]` Write `results/baseline.md` with the table; regenerate the layout of Figs. 3 to 9 from the same script.
+  - `[~]` Write `results/baseline.md` with the table (done, including `REF-A`, `REF-B`, `A4-C-B`, `A5-L-B`); regenerate the layout of Figs. 3 to 9 from the same script (pending; per-trajectory figures exist in `results/eval`).
 - Order: harness first (CPU), then A3, then the two reference runs.
 - Effort: 1 to 2 days for the harness; reference runs 24 GPU-hours each.
 - Success: baseline table committed with rows "as reported", legacy, `REF-A`, `REF-B`; every later task reports the same columns next to it.
@@ -252,6 +252,9 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - `results/baseline.md` has the "as reported" and legacy rows; the `REF-A`/`REF-B` rows and the figure-layout regeneration (Figs. 3 to 9; `--plot` writes one 3-panel rollout figure per trajectory) are pending. The reference runs wait for A3, as planned in the Order line.
   - Metric definitions are in the header of `results/baseline.md`. Energy increase uses e proportional to T (nHI + 2 nHII) / nH at fixed nH, threshold 1e-12 relative per step; the ground truth gives 0.
 - Log:
+  - 2026-11-16 | Scored `REF-A` and `REF-B` (best and last checkpoint) on the report set and on the 200-trajectory `refB_valid` set (`jobs/evaluate_run.job`, jobs 3253117 to 3253120) | `results/baseline.md`, `results/eval/*` | **[measured]** `REF-B_last` (900 epochs): T median 0.046 dex, T final 0.073, mass violation 0.034, energy-increase fraction about 0 on `refB_valid`; Family 3 T median 0.57. `REF-B_BEST` (June rule, one-step MSE): T median 0.82 dex, mass violation 4.3. `REF-A_last` (stopped at epoch 752): T median 0.23, mass violation 1.1; `REF-A_BEST` 0.39 and 0.82 | the June selection rule picks bad checkpoints: BEST is worse than last for both; the soft mass penalty leaves mass violations of 0.03 to 4 (nH off by 3% to 55x) in the reference runs.
+  - 2026-11-16 | `REF-A` did not complete | `results/runs/REF-A/losses_REF-A.txt` ends at epoch 752 of 900 (114 s per epoch, 23.5 h cap); the mass ramp reached 83% of its maximum | open: resume for the last 148 epochs (about 5 h, exact resume) if Pablo wants the full 900-epoch baseline; `REF-B` finished all 900.
+  - 2026-11-16 | Caveat on the cliff columns | in `refB_valid` the median cliff error is 0 yr for most groups, because some trajectories have the steepest d ln T at row 0 (`cliff_time_true_yr` = 0, including `Valid_Fam_3` of the report set) | open: define the cliff as the steepest d ln T after the first row or above a threshold; the `cliffs missed` and `T` columns are not affected.
   - 2026-11-14 | Submitted the reference runs `REF-A` (job 3252215) and `REF-B` (job 3252217) on the A3 data | see section 8.2 | both running; `REF-B` first went pending under `cs-302` (1 running job per user), resubmitted under `math-454` | scoring with `evaluate.py` when they finish.
   - 2026-11-14 | Harness written: batched float64 free rollout in log space (no exp until metrics), per-trajectory and per-family metrics, teacher-forced one-step RMS by decade of the true |d ln T| stored as diagnostics | `grackle_pinn/evaluate.py` | runs end-to-end | CPU login node too loaded (load 35) for tests, so all runs go through Slurm.
   - 2026-11-14 | Scored all 14 legacy checkpoints on the report set (float64, float32) and on 50 grid trajectories (float64) | job 3252188, account `cs-302`, QOS `cs-302` (fair-share 0.318), 19 m 55 s, 42 result files in `results/eval/` | see `results/baseline.md`; on the report set the best are `legacy_modelB_long` (T median 0.080 dex, final 0.162 dex, nHI/nHII final 0.023/0.041) and `legacy_BEST_noClamp_Long` (0.092, 0.248); the worst are `legacy_modelB`/`BEST_modelB` (final T 15 and 8.6 dex), `legacy_1` on Family 0 (final T 225 dex) and the `fam3` runs (0.6 to 1.8 dex median) | confirms the baseline can now be measured.
@@ -285,7 +288,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - 2026-11-14 | Family labels | the grid ICs and their order are unchanged, so `Trajectory_Families.csv` (family per grid file) is reused; the kNN oracle (k = 3, report) labels the validation files | not re-clustered on the new trajectories | OK.
 
 
-### A4. State variables with built-in constraints `[~]`
+### A4. State variables with built-in constraints `[X]`
 - Goal: the network predicts in (internal energy, ionised fraction x) with nH carried through unchanged, as one of the ways of imposing physics.
 - Why: R3 and Fig. 3 bottom. Mass conservation becomes exact instead of a penalty with a weight to tune; energy can be forced non-increasing, which removes outputs like Fig. 4 bottom (T rising 20x) and bounds x to [0, 1].
 - Position in the project: this is physics imposed through the architecture ("hard" constraint). It does not replace the explicit physics losses, which stay mandatory (section 0.2); B3 compares hard, soft and combined variants.
@@ -293,7 +296,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - `[X]` Inputs: ln e (or ln T), logit x, ln nH. Outputs: -softplus(.) for d ln e; a bounded update for logit x.
   - `[X]` Recover T, nHI, nHII analytically from (e, x, nH) for metrics and plots.
   - `[X]` Both parameterisations selectable by config: the report's (ln T, ln nHI, ln nHII) with soft mass loss, and the constrained one.
-  - `[~]` Training run on the REF-B data for the success check: `A4-C-B` (section 8.2), then scoring against `REF-B` on Family 3.
+  - `[X]` Training run on the REF-B data for the success check: `A4-C-B` (section 8.2), scored against `REF-B` on Family 3.
 - Effort: 1 day plus one training run.
 - Success: mass violation at float64 round-off; zero unphysical outputs; free-rollout metrics no worse than `REF` on Family 3.
 - Implementation: `grackle_pinn/param.py` (`report` and `constrained`), selected by `parameterisation` in the config; features z = (ln e, logit x, ln nH) with nH = nHI + nHII, x = nHII/nH, ln e = ln T + ln(1 + x); outputs d ln e = -softplus(o1) and d logit x = L tanh(o2), L = 1.25 x the largest |d logit x| in the training data (29.96 for the REF-B data); ln nH carried unchanged; last-layer bias of o1 set to -12 so that initial energy decrements are 6e-6 instead of 0.69. Checkpoints store the parameterisation, so `evaluate.py` rolls out either kind.
@@ -301,7 +304,9 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - 2026-11-14 | Data ranges that fix the design | `refB_valid` | d ln e <= 0 in every row (max -3.4e-10); |d logit x| up to 22.6 in one step (x from about 1e-10 to order 0.1); d ln e down to -2.26 in one step; logit x in [-10.3, 21.2] **[measured]** | bounded update L tanh(.) with L set from the data; the energy is non-increasing in the ground truth, so the constraint is consistent with it.
   - 2026-11-14 | Unit tests (`tests/test_param_and_resume.py`, job 3252239) | real trajectories and 50 randomly re-initialised wild networks | round trip ln state -> z -> ln state 3.6e-15; advance(targets) reproduces the next state to 3.6e-15; worst mass violation 1.8e-15; 0 energy increases; x in (0, 1) | constraints hold for any network output.
   - 2026-11-14 | 6-epoch smoke run on the REF-B data (`constrained_smoke`, job 3252240) scored on the 8 report trajectories | `results/eval_smoke` | mass violation 1.7e-16 overall, 0 energy increases, but T median 0.061 dex and Family 3 cliffs missed (2/2): untrained, as expected | only the constraints are verified here; accuracy comes from `A4-C-B`.
-  - 2026-11-14 | Submitted `A4-C-B` (constrained parameterisation, REF-B data and settings, 800 epochs) | job 3252249, account `env540`, QOS `normal` (`cs-302` and `math-454` slots hold REF-A/B) | running | -.
+  - 2026-11-14 | Submitted `A4-C-B` (constrained parameterisation, REF-B data and settings, 800 epochs) | job 3252249, account `env540`, QOS `normal` (`cs-302` and `math-454` slots hold REF-A/B) | finished 2026-11-15 12:56 (18.0 h) | -.
+  - 2026-11-16 | Scored `A4-C-B_last` against `REF-B_last` (free rollouts, float64) | `results/baseline.md` | **[measured]** `refB_valid`, Family 3: T median 0.089 vs 0.572 dex, T final 0.13 vs 1.79, nHI final 0.006 vs 5.6. All families: T median 0.093 vs 0.046 (A4 is worse on Families 0 to 2: 0.10, 0.08, 0.14 vs 0.02, 0.06, 0.03). Report set, Family 3: cliff error 0.5% (4,000 yr) vs 50% on `Train_Fam_3`. Mass violation 8.9e-16 vs 0.034; energy increases 0 vs 4e-5 (report set: 0 vs 0.86) | success criteria met: mass at round-off, 0 energy increases, Family 3 clearly better than `REF-B`. The Families 0 to 2 drift is still 0.1 dex, as expected: A4 does not change target or loss (A5 does).
+  - 2026-11-16 | Confound to keep in mind | `A4-C-B` also differs from `REF-B` by the new loop (800 vs 900 epochs, selection on free-rollout windows instead of one-step MSE); `A4-C-B_BEST` and `_last` differ by 0.15 vs 0.09 dex T median | the gain on Family 3 is the combined effect of the constrained parameterisation and of the new selection rule; B3 will separate the two if needed.
 
 
 ### A5. Target and loss that resolve the flat regime `[~]`
@@ -316,7 +321,10 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 - Implementation: the network outputs two numbers, standardised in (u1, u2) space. Rollouts invert the transform (d ln e = -exp(u1), d logit x = s sinh(u2)) with u clipped to the training range plus 2 nats, so the update stays finite for any output. The ranges in the training data are u1 in [-20.5, -0.9] (increments 1.3e-9 to 0.4 in ln e) and u2 in [-24.2, 26.6] **[measured, report8 data]**.
 - Log:
   - 2026-11-14 | Unit tests (`tests/test_param_and_resume.py`, job 3252306) | report8 data, 50 wild networks | inverse of the target transform reproduces the next state to 2.8e-14; worst mass violation 1.9e-15; 0 energy increases; resumed run equals uninterrupted run (weight difference 0.0) | `lograte` is correct and resumable.
-  - 2026-11-14 | Submitted `A5-L-B` (lograte, REF-B data, weight factor 0, otherwise identical to `A4-C-B`) | job 3252307, account `env540`, QOS `normal` (`cs-302` and `math-454` slots hold REF-A/B) | running | -.
+  - 2026-11-14 | Submitted `A5-L-B` (lograte, REF-B data, weight factor 0, otherwise identical to `A4-C-B`) | job 3252307, account `env540`, QOS `normal` (`cs-302` and `math-454` slots hold REF-A/B) | finished 2026-11-15 14:23 (17.9 h) | -.
+  - 2026-11-16 | Scored `A5-L-B_last` (free rollouts, float64, `refB_valid`, 50 per family) | `results/baseline.md` | **[measured]** T median 0.00067 / 0.00024 / 0.0011 dex and T final 0.00067 / 0.00034 / 0.0010 dex for Families 0 / 1 / 2 (`A4-C-B_last`: 0.10 / 0.08 / 0.14; `REF-B_last`: 0.02 / 0.06 / 0.03). Report set, Family 0: 5e-6 dex. Family 3: T median 1.36 dex, nHI final 5.7, 3 of 50 cliffs missed; report set `Train_Fam_3` cliff error 71% (`A4-C-B_last` 0.5%) | the flat-regime drift is removed: errors on Families 0 to 2 fall by 2 to 3 orders of magnitude, with mass and energy still exact (confirms R3's diagnosis). Family 3 gets worse than A4 and `REF-B`: the post-cliff state is wrong (nHI off by 5 to 6 dex).
+  - 2026-11-16 | Success criterion check | Families 0 to 2 final T under 0.02 dex: **met** (worst median 0.0010 dex on `refB_valid`, 0.0098 on the report set Family 2). Family 3 cliff within 2%: **not met** on the 8 report trajectories (71%; the cliff is mistimed). No regression on the Family 3 case of Fig. 5: **not met** (A4 and `REF-B` do better) | A5 stays `[~]`.
+  - 2026-11-16 | Hypothesis for the Family 3 failure **[inferred, not tested]** | plain MSE in log-rate space gives the cliff steps (about 40% of Family 3 rows are large, but a few large ones carry the dynamics) no extra weight, and u1 = ln(-d ln e) compresses the cliff steps against the flat steps; a small bias in u maps to a large relative error in the increment at the cliff | open: options are (a) a mixed loss (log-space MSE plus a weighted physical-space term), (b) the log-rate target with the `1 + w|y|` weight on the physical increment, (c) A5-L-A on the REF-A data to see if more flat/cliff variety helps. Pablo to choose.
 
 
 ### A6. Training-loop fixes `[X]`
@@ -473,11 +481,11 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 
 ### 8.2 New runs
 - Entry format: `run id | date | task | data | config | account, QOS, fair-share at submission, job id | status | key metrics | verdict`.
-- `REF-A` | 2026-11-14 | A2 | `refA_train.npz` (25.0M pairs, 1,000 files), valid `refA_valid.npz` (300) | `configs/refA.json`: 12 x 512 tanh, float64, batch 8192, lr 1e-4, weight factor 20, mass ramp 1e7 x epoch/899, 900 epochs, stop at 23.5 h | account `cs-302`, QOS `cs-302`, fair-share 0.261 (env540 0.325, math-454 0.180, master 0.024), job 3252215 | running (started 17:37) | - | -
-- `REF-B` | 2026-11-14 | A2 | `refB_train.npz` (20.0M pairs, 800 files), valid `refB_valid.npz` (200) | `configs/refB.json`, same as REF-A | account `math-454`, QOS `math-454`, fair-share 0.180, job 3252217 | running (started 17:38) | - | -
+- `REF-A` | 2026-11-14 | A2 | `refA_train.npz` (25.0M pairs, 1,000 files), valid `refA_valid.npz` (300) | `configs/refA.json`: 12 x 512 tanh, float64, batch 8192, lr 1e-4, weight factor 20, mass ramp 1e7 x epoch/899, 900 epochs, stop at 23.5 h | account `cs-302`, QOS `cs-302`, fair-share 0.261 (env540 0.325, math-454 0.180, master 0.024), job 3252215 | stopped at the 23.5 h cap, epoch 752 of 900 (finished 2026-11-15 17:09) | `results/runs/REF-A` | scored: `results/baseline.md`
+- `REF-B` | 2026-11-14 | A2 | `refB_train.npz` (20.0M pairs, 800 files), valid `refB_valid.npz` (200) | `configs/refB.json`, same as REF-A | account `math-454`, QOS `math-454`, fair-share 0.180, job 3252217 | finished 900 epochs, 22.2 h (2026-11-15 15:50) | `results/runs/REF-B` | scored: `results/baseline.md`
 - `bench64`, `bench32`, `constrained_smoke` | 2026-11-14 | A6/A4 | `refA_train` (first two), `refB_train` (last) | 3, 3 and 6 epochs, speed and smoke tests | `env540`, QOS `debug`, job 3252240 | finished | see A6/A4 logs | not models.
-- `A4-C-B` | 2026-11-14 | A4 | `refB_train.npz`, valid `refB_valid.npz` | `configs/A4-C-B.json`: constrained parameterisation, 12 x 512, float64, weight factor 20, 800 epochs, selection on free-rollout windows | account `env540`, QOS `normal`, fair-share 0.325, job 3252249 | running (started 18:58) | - | -
-- `A5-L-B` | 2026-11-14 | A5 | `refB_train.npz`, valid `refB_valid.npz` | `configs/A5-L-B.json`: lograte parameterisation, plain MSE, 12 x 512, float64, 800 epochs, selection on free-rollout windows | account `env540`, QOS `normal`, fair-share 0.294, job 3252307 | running | - | -
+- `A4-C-B` | 2026-11-14 | A4 | `refB_train.npz`, valid `refB_valid.npz` | `configs/A4-C-B.json`: constrained parameterisation, 12 x 512, float64, weight factor 20, 800 epochs, selection on free-rollout windows | account `env540`, QOS `normal`, fair-share 0.325, job 3252249 | finished 800 epochs, 18.0 h (2026-11-15 12:56) | `results/runs/A4-C-B` | scored: `results/baseline.md`
+- `A5-L-B` | 2026-11-14 | A5 | `refB_train.npz`, valid `refB_valid.npz` | `configs/A5-L-B.json`: lograte parameterisation, plain MSE, 12 x 512, float64, 800 epochs, selection on free-rollout windows | account `env540`, QOS `normal`, fair-share 0.294, job 3252307 | finished 800 epochs, 17.9 h (2026-11-15 14:23) | `results/runs/A5-L-B` | scored: `results/baseline.md`
 - Configuration choice: the report's nominal 10,000 epochs would again leave the mass-loss ramp under 10% of its maximum (R2); 900 epochs fit the 24 h wall time (June: 72 to 89 s per epoch), so the ramp reaches its full 1e7. This is the only deviation from the report configuration. The checkpoints keep being chosen on one-step validation MSE until A6.
 
 ## 9. Open questions

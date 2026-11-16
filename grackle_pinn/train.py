@@ -30,6 +30,7 @@ DEFAULTS = dict(
     hidden_dim=512, hidden_layers=12, parameterisation="report",
     batch_size=8192, learning_rate=1.0e-4, epochs=900, check_every=10,
     weight_factor=10.0, lambda_mass_max=1.0e7, ramp_fraction=1.0,
+    legacy_resume_epoch=None,                         # only for a checkpoint of the June loop (no epoch stored): epochs already done
     max_runtime_hours=23.5, budget_hours=None,        # None: ramp follows optimiser steps only; a number: also follows that wall-clock budget
     scheduler_patience=5, scheduler_factor=0.5, min_lr=1e-6, grad_clip=50.0,
     seed=0, dtype="float64", stop_after_epochs=None,   # the last one is for tests of resume
@@ -123,6 +124,10 @@ def main():
         if "epoch" in ckpt:      # a checkpoint of this code: continue exactly
             start_epoch, step = ckpt["epoch"], ckpt["step"]
             best_score, elapsed_before, resumed = ckpt["best_score"], ckpt["elapsed"], True
+        elif cfg["legacy_resume_epoch"] is not None:   # June-loop checkpoint: continue the epoch counter and the ramp by hand
+            start_epoch = int(cfg["legacy_resume_epoch"])
+            step = start_epoch * ((N + BS - 1) // BS)
+            best_score, resumed = float(ckpt.get("best_loss", float("inf"))), True
         print(f"[✓] loaded {args.model}; resumed={resumed}, start epoch {start_epoch}, step {step}", flush=True)
 
     phys = PhysicsLossManager(model, sc["in_mean"], sc["in_std"], sc["tg_mean"], sc["tg_std"])

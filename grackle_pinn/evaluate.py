@@ -289,19 +289,38 @@ def evaluate(ckpt, scaling, items, device, dtype, label, set_name, max_steps=Non
     }
 
 
-def plot_rollout(name, truth, pred, path):
+def plot_rollout(name, truth, pred, path, title_extra=""):
+    """Layout of the report's Figs. 3 to 9, one figure per trajectory, columns T, nHI, nHII:
+    top: one-step log-increments d ln y along the free rollout (Grackle dashed, prediction solid; symlog axis);
+    middle: the state against time (log y);
+    bottom: predicted against Grackle values (log10) with the identity line, coloured by time."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib.colors import SymLogNorm  # noqa: F401  (kept for readers who want a colour scale)
+    names = ("T [K]", "nHI [cm$^{-3}$]", "nHII [cm$^{-3}$]")
     t = np.arange(len(truth)) * STEP_YR / 1e6
-    fig, ax = plt.subplots(1, 3, figsize=(15, 4))
-    for a, j, title in zip(ax, range(3), ("T [K]", "nHI [cm^-3]", "nHII [cm^-3]")):
+    pc = np.clip(pred, -700, 700)
+    fig, ax = plt.subplots(3, 3, figsize=(15, 12), layout="constrained")
+    for j in range(3):
+        a = ax[0, j]
+        a.plot(t[1:], np.diff(truth[:, j]), "k--", lw=1, label="Grackle")
+        a.plot(t[1:], np.diff(pc[:, j]), lw=1, label="free rollout")
+        a.set_yscale("symlog", linthresh=1e-8); a.set_ylabel("d ln y per 100 yr")
+        a.set_title(f"{name}{title_extra}: {names[j]}, log-increment")
+        a = ax[1, j]
         a.plot(t, np.exp(truth[:, j]), "k--", label="Grackle")
-        a.plot(t, np.exp(np.clip(pred[:, j], -700, 700)), label="free rollout")
-        a.set_yscale("log"); a.set_xlabel("t [Myr]"); a.set_title(f"{name}: {title}")
-    ax[0].legend()
+        a.plot(t, np.exp(pc[:, j]), label="free rollout")
+        a.set_yscale("log"); a.set_xlabel("t [Myr]"); a.set_ylabel(names[j])
+        a = ax[2, j]
+        lt, lp = truth[:, j] / LN10, pc[:, j] / LN10
+        sc = a.scatter(lt, lp, c=t, s=3, cmap="viridis")
+        lo, hi = min(lt.min(), lp.min()), max(lt.max(), lp.max())
+        a.plot([lo, hi], [lo, hi], "r-", lw=0.8)
+        a.set_xlabel("log10 Grackle"); a.set_ylabel("log10 prediction")
+    ax[0, 0].legend(); fig.colorbar(sc, ax=ax[2, :], label="t [Myr]", shrink=0.8, pad=0.01)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    fig.tight_layout(); fig.savefig(path, dpi=100); plt.close(fig)
+    fig.savefig(path, dpi=100); plt.close(fig)
 
 
 def fmt(x, f="{:.3g}"):

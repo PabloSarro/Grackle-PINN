@@ -49,7 +49,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - `[-]` B7 Training-set sampling strategies
 - Deliverable
   - `[-]` C1 Updated report
-- Next step: A5 is done (2026-11-17): best candidate `A5-M10-B`. Seed-1 runs of `A5-M10-B` and `A5-W-B` are submitted (jobs 3255462, 3255463); score them when they finish and decide the ranking. Open for Pablo: whether B1 (variable step) or B7 (sampling) starts from this loss. B3 stays deferred until Pablo confirms. A1 is done apart from its listed deviations.
+- Next step: A5 is done (2026-11-17): best candidate `A5-M10-B`. Seed-1 runs of `A5-M10-B`, `A5-W-B` and `A5-M1-B` are submitted (jobs 3255462, 3255463, and `A5-M1-B-s1` job 3255476); score them when they finish and decide the ranking. Open for Pablo: whether B1 (variable step) or B7 (sampling) starts from this loss. B3 stays deferred until Pablo confirms. A1 is done apart from its listed deviations.
 
 ## 1. Baseline: what the report states
 
@@ -503,3 +503,4 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 - No open questions as of 2026-11-14. Q1 to Q15 are answered; the answers are recorded in section 2 and applied in the tasks. Future questions go here.
 - `A5-M10-B-s1` | 2026-11-17 | A5 seed check | `refB_train.npz`, valid `refB_valid.npz` | `configs/A5-M10-B-s1.json`: as `A5-M10-B`, seed 1 | account `cs-302`, QOS `cs-302`, fair-share 0.262, job 3255462 | pending | - | -
 - `A5-W-B-s1` | 2026-11-17 | A5 seed check | same | `configs/A5-W-B-s1.json`: as `A5-W-B`, seed 1 | account `math-454`, QOS `math-454`, fair-share 0.212, job 3255463 | pending | - | -
+- `A5-M1-B-s1` | 2026-11-17 | A5 seed check | same | `configs/A5-M1-B-s1.json`: as `A5-M1-B`, seed 1 | account `env540`, QOS `normal`, fair-share 0.186 (`cs-302` and `math-454` slots hold the other two seed runs), job 3255476 | pending | - | -

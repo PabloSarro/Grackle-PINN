@@ -23,10 +23,16 @@ class GrackleDataset(Dataset):
         self.param = param
         self.logstate = None   # (n_traj, n_rows, 3) when loaded from .npz; used for rollout-based selection
 
-        if str(folder_path).endswith(".npz"):
+        if str(folder_path).endswith(".npz") and "cur" in np.load(folder_path).files:
+            # Pair format (B7 sampling sets): independent (ln state_t, ln state_t+1) pairs; no trajectory structure,
+            # so rollout-based selection is not available (self.logstate stays None).
+            d = np.load(folder_path)
+            pairs = [(torch.from_numpy(d["cur"]), torch.from_numpy(d["nxt"]))]
+        elif str(folder_path).endswith(".npz"):
             # Compact format (A3): logstate (n_traj, n_rows, 3) = ln [T, nHI, nHII]; adjacent rows form one step.
             self.logstate = np.load(folder_path)["logstate"]
             trajs = list(self.logstate)
+            pairs = [(torch.from_numpy(ls[:-1]), torch.from_numpy(ls[1:])) for ls in trajs]
         else:
             files = glob.glob(os.path.join(folder_path, pattern))
             if not files:
@@ -35,11 +41,10 @@ class GrackleDataset(Dataset):
             for f in files:
                 data = pd.read_csv(f, comment='#', sep=r'\s+', header=None)
                 trajs.append(np.log(data.iloc[:, [3, 6, 7]].values.astype(np.float64)))
+            pairs = [(torch.from_numpy(ls[:-1]), torch.from_numpy(ls[1:])) for ls in trajs]
 
         inputs, targets = [], []
-        for ls in trajs:
-            cur = torch.from_numpy(ls[:-1])
-            nxt = torch.from_numpy(ls[1:])
+        for cur, nxt in pairs:
             inputs.append(param.features(cur))
             targets.append(param.targets(cur, nxt))
         self.all_inputs = torch.cat(inputs).to(torch.get_default_dtype())

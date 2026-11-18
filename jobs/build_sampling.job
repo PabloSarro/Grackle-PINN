@@ -1,0 +1,15 @@
+#!/bin/bash
+# B7 step 1: pair datasets for the sampling strategies S3 to S6 (scripts/datasets/sampling.py). CPU only.
+# Usage: sbatch --account=<acc> --qos=<qos> jobs/build_sampling.job
+#SBATCH --job-name=BuildSamp
+#SBATCH --time=04:00:00
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=48G
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:1
+#SBATCH --output=results/logs/build_sampling_%j.log
+cd "$SLURM_SUBMIT_DIR"
+source /home/sarro/venvs/grackle-pinn/bin/activate
+python scripts/datasets/sampling.py --gt /scratch/izar/sarro/ground_truth --out data/datasets --pool-size 3000 --budget 20000000 --seed 0

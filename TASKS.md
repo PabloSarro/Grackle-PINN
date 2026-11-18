@@ -433,7 +433,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 - Effort: open-ended; not planned in detail.
 - Log: none yet.
 
-### B7. Training-set sampling strategies `[-]`
+### B7. Training-set sampling strategies `[~]`
 - Goal: compare ways of choosing which trajectories and pairs go into the training set, beyond the report's two (Pablo, 2026-11-14: Models A and B are just two possible approaches).
 - Why: the report attributes the failures to dataset balance; R3 says the loss is the cause. Testing several strategies under the same loss and budget separates the two explanations and gives the final models the best data.
 - Candidate strategies:
@@ -445,12 +445,15 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - S6 corrected equilibrium filter (from B5): form (state, next state) pairs first, then subsample by activity; keep float64.
   - S7 loss-based resampling during training: draw more from pairs with high current error.
 - Steps:
-  - `[-]` Implement the strategies as dataset builders sharing one interface (A3 datasets as input).
+  - `[~]` Implement the strategies as dataset builders sharing one interface (A3 datasets as input). Step 1 done 2026-11-18: `scripts/datasets/sampling.py` builds S3–S6 from a common pool (3,000 random ICs excluding the REF-A/B validation files, seed 0) with a 20M-pair budget each; output is pair-format `.npz` (`cur`, `nxt`), read by `GrackleDataset` (tested: identical pairs to the trajectory loader). S7 needs a training-loop change and is not built yet.
   - `[-]` Screen with the B3 protocol (fixed-step model from A5, equal budget, identical seed), scored on the A2 free-rollout table.
   - `[-]` Carry the best strategy into B3 stage 4.
 - Effort: 1 to 2 weeks including runs.
 - Success: a table of strategies with the A2 columns; a stated answer on whether sampling matters once the target and loss of A5 are used.
-- Log: none yet.
+- Log:
+  - 2026-11-18 | Plan decision | the plan order puts B7 next after A5 (section 7). B3, the screening protocol, is deferred until Pablo confirms, so the screening runs are not submitted yet. Only the CPU-only dataset builders are done. | - | -
+  - 2026-11-18 | Loader for pair datasets | `grackle_pinn/data_utils.py` reads `cur`/`nxt` `.npz` files; a test on `report8` gives the same inputs and targets as the trajectory loader (equal to the last bit) | - | no S7 support (no trajectory structure for rollout selection).
+  - 2026-11-18 | Building the pair sets | job 3257722 (`jobs/build_sampling.job`, account `env540`, QOS `normal`, CPU work on a GPU partition as in the existing build job) | running | output `data/datasets/sampling_S3..S6.npz`, pool list `configs/datasets/sampling_pool.json`.
 
 ## 6b. Tasks: deliverable
 

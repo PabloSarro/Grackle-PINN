@@ -49,7 +49,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - `[-]` B7 Training-set sampling strategies
 - Deliverable
   - `[-]` C1 Updated report
-- Next step: A5 is done (2026-11-17), seed check done (2026-11-18). Ranking of the physical-increment variants is in the seed-check log. Open for Pablo: whether B1 (variable step) or B7 (sampling) starts from `A5-M10-B`. Open for Pablo: whether B1 (variable step) or B7 (sampling) starts from this loss. B3 stays deferred until Pablo confirms. A1 is done apart from its listed deviations.
+- Next step: A5 done; B7 step 1 done; the S3–S6 screen (`B7-S3` to `B7-S6`, jobs 3257724 to 3257727, about 18 h) is running. Score with the A2 table when they finish, then compare with `A5-M10-B` (S2 is the same data class as REF-B, so its comparison is `A5-M10-B` itself, which used the REF-B pairs). B1 and B3 stay open for Pablo. Open for Pablo: whether B1 (variable step) or B7 (sampling) starts from this loss. B3 stays deferred until Pablo confirms. A1 is done apart from its listed deviations.
 
 ## 1. Baseline: what the report states
 
@@ -451,7 +451,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 - Effort: 1 to 2 weeks including runs.
 - Success: a table of strategies with the A2 columns; a stated answer on whether sampling matters once the target and loss of A5 are used.
 - Log:
-  - 2026-11-18 | Plan decision | the plan order puts B7 next after A5 (section 7). B3, the screening protocol, is deferred until Pablo confirms, so the screening runs are not submitted yet. Only the CPU-only dataset builders are done. | - | -
+  - 2026-11-18 | Plan decision | the plan order puts B7 next after A5 (section 7). Pablo confirmed the screening protocol ("whatever you consider"), so the S3 to S6 screen was submitted. | - | -
   - 2026-11-18 | Loader for pair datasets | `grackle_pinn/data_utils.py` reads `cur`/`nxt` `.npz` files; a test on `report8` gives the same inputs and targets as the trajectory loader (equal to the last bit) | - | no S7 support (no trajectory structure for rollout selection).
   - 2026-11-18 | Built the pair sets | job 3257722 (`jobs/build_sampling.job`, account `env540`, QOS `normal`, CPU work on a GPU partition as in the existing build job), pool 3,000 trajectories = 75.0M pairs | finished | **[measured]** each 20,000,000 pairs (960 MB each, in `data/datasets`, not tracked): S3 from 800 trajectories, median activity 2.4e-5, 15% of pairs below 1e-7; S4 from 3,000 trajectories, median 1.3e-6, 34% below 1e-7; S5 median 5.1e-5, 2% below 1e-7; S6 median 4.1e-5, 0.2% below 1e-7. Pool list in `configs/datasets/sampling_pool.json`. | the sets differ as intended; screening runs (the B3 protocol) wait for Pablo's confirmation.
 
@@ -508,3 +508,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 - `A5-M10-B-s1` | 2026-11-17 | A5 seed check | `refB_train.npz`, valid `refB_valid.npz` | `configs/A5-M10-B-s1.json`: as `A5-M10-B`, seed 1 | account `cs-302`, QOS `cs-302`, fair-share 0.262, job 3255462 | pending | finished 2026-11-18 (800 epochs, 18 h), scored 2026-11-18 (jobs 3257705–3257707) | -
 - `A5-W-B-s1` | 2026-11-17 | A5 seed check | same | `configs/A5-W-B-s1.json`: as `A5-W-B`, seed 1 | account `math-454`, QOS `math-454`, fair-share 0.212, job 3255463 | pending | finished 2026-11-18 (800 epochs, 18 h), scored 2026-11-18 (jobs 3257705–3257707) | -
 - `A5-M1-B-s1` | 2026-11-17 | A5 seed check | same | `configs/A5-M1-B-s1.json`: as `A5-M1-B`, seed 1 | account `env540`, QOS `normal`, fair-share 0.186 (`cs-302` and `math-454` slots hold the other two seed runs), job 3255476 | pending | finished 2026-11-18 (800 epochs, 18 h), scored 2026-11-18 (jobs 3257705–3257707) | -
+- `B7-S3` | 2026-11-18 | B7 screen | `sampling_S3.npz` (20M pairs, 800 trajectories), valid `refB_valid.npz` | `configs/B7-S3.json`: as `A5-M10-B` (lograte, phys_weight 10, seed 0, 800 epochs) | account `cs-302`, QOS `cs-302`, job 3257724 | submitted | - | -
+- `B7-S4` | 2026-11-18 | B7 screen | `sampling_S4.npz` (20M pairs, per decade of activity) | `configs/B7-S4.json`: as above | account `math-454`, QOS `math-454`, job 3257725 | submitted | - | -
+- `B7-S5` | 2026-11-18 | B7 screen | `sampling_S5.npz` (20M pairs, per state-space cell) | `configs/B7-S5.json`: as above | account `env540`, QOS `normal`, job 3257726 | submitted | - | -
+- `B7-S6` | 2026-11-18 | B7 screen | `sampling_S6.npz` (20M pairs, equilibrium thinned) | `configs/B7-S6.json`: as above | account `env540`, QOS `normal`, job 3257727 | submitted | - | -

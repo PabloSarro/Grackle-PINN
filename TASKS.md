@@ -453,7 +453,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 - Log:
   - 2026-11-18 | Plan decision | the plan order puts B7 next after A5 (section 7). B3, the screening protocol, is deferred until Pablo confirms, so the screening runs are not submitted yet. Only the CPU-only dataset builders are done. | - | -
   - 2026-11-18 | Loader for pair datasets | `grackle_pinn/data_utils.py` reads `cur`/`nxt` `.npz` files; a test on `report8` gives the same inputs and targets as the trajectory loader (equal to the last bit) | - | no S7 support (no trajectory structure for rollout selection).
-  - 2026-11-18 | Building the pair sets | job 3257722 (`jobs/build_sampling.job`, account `env540`, QOS `normal`, CPU work on a GPU partition as in the existing build job) | running | output `data/datasets/sampling_S3..S6.npz`, pool list `configs/datasets/sampling_pool.json`.
+  - 2026-11-18 | Built the pair sets | job 3257722 (`jobs/build_sampling.job`, account `env540`, QOS `normal`, CPU work on a GPU partition as in the existing build job), pool 3,000 trajectories = 75.0M pairs | finished | **[measured]** each 20,000,000 pairs (960 MB each, in `data/datasets`, not tracked): S3 from 800 trajectories, median activity 2.4e-5, 15% of pairs below 1e-7; S4 from 3,000 trajectories, median 1.3e-6, 34% below 1e-7; S5 median 5.1e-5, 2% below 1e-7; S6 median 4.1e-5, 0.2% below 1e-7. Pool list in `configs/datasets/sampling_pool.json`. | the sets differ as intended; screening runs (the B3 protocol) wait for Pablo's confirmation.
 
 ## 6b. Tasks: deliverable
 

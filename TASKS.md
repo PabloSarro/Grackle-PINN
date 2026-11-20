@@ -433,7 +433,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 - Effort: open-ended; not planned in detail.
 - Log: none yet.
 
-### B7. Training-set sampling strategies `[~]`
+### B7. Training-set sampling strategies `[X]`
 - Goal: compare ways of choosing which trajectories and pairs go into the training set, beyond the report's two (Pablo, 2026-11-14: Models A and B are just two possible approaches).
 - Why: the report attributes the failures to dataset balance; R3 says the loss is the cause. Testing several strategies under the same loss and budget separates the two explanations and gives the final models the best data.
 - Candidate strategies:
@@ -446,13 +446,14 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
   - S7 loss-based resampling during training: draw more from pairs with high current error.
 - Steps:
   - `[~]` Implement the strategies as dataset builders sharing one interface (A3 datasets as input). Step 1 done 2026-11-18: `scripts/datasets/sampling.py` builds S3–S6 from a common pool (3,000 random ICs excluding the REF-A/B validation files, seed 0) with a 20M-pair budget each; output is pair-format `.npz` (`cur`, `nxt`), read by `GrackleDataset` (tested: identical pairs to the trajectory loader). S7 needs a training-loop change and is not built yet.
-  - `[-]` Screen with the B3 protocol (fixed-step model from A5, equal budget, identical seed), scored on the A2 free-rollout table.
-  - `[-]` Carry the best strategy into B3 stage 4.
+  - `[X]` Screen with the B3 protocol (fixed-step model from A5, equal budget, identical seed), scored on the A2 free-rollout table: `B7-S3` to `B7-S6` (2026-11-20), against `A5-M10-B` (S2) on the same settings.
+  - `[-]` Carry the best strategy into B3 stage 4. Not needed on this evidence: no strategy beats S2 by more than the seed spread (see the log).
 - Effort: 1 to 2 weeks including runs.
 - Success: a table of strategies with the A2 columns; a stated answer on whether sampling matters once the target and loss of A5 are used.
 - Log:
   - 2026-11-18 | Plan decision | the plan order puts B7 next after A5 (section 7). Pablo confirmed the screening protocol ("whatever you consider"), so the S3 to S6 screen was submitted. | - | -
   - 2026-11-18 | Loader for pair datasets | `grackle_pinn/data_utils.py` reads `cur`/`nxt` `.npz` files; a test on `report8` gives the same inputs and targets as the trajectory loader (equal to the last bit) | - | no S7 support (no trajectory structure for rollout selection).
+  - 2026-11-20 | B7 screen scored (last checkpoint, `refB_valid`; S2 = `A5-M10-B`, same loss and settings; jobs 3261814 to 3261817) | `results/baseline.md`, `results/eval/B7-*` | **[measured]** T median per family 0 / 1 / 2 / 3 (dex): S2 0.00015 / 0.00020 / 0.00057 / 0.00043; S3 0.00035 / 0.00023 / 0.00074 / 0.00132; S4 0.00010 / 0.00024 / 0.00056 / 0.00064; S5 0.00036 / 0.00009 / 0.00038 / 0.00040; S6 0.00087 / 0.00018 / 0.00085 / 0.00140. Cliffs missed 0 of 43 for every set; mass violation 9e-16; no energy increases. Report set Family 3: S2 0.00028, S3 0.00095, S4 0.00074, S5 0.00034, S6 0.00129 | **the choice of pairs matters little once the A5 target and loss are used.** S5 (state-space coverage) ties S2 on Family 3 and is best on Family 1; S3 (uniform random, the control) and S6 (thinned equilibrium) are the worst on Family 3, by about 0.001 dex. Those differences are about the size of the seed spread measured for `A5-M10-B` (Family 3 0.0004 on both seeds) and rest on one seed each, so the ranking is not firm. S4 is not better than S2. Nothing justifies carrying a different strategy into B3 stage 4. Caveat: one seed per strategy.
   - 2026-11-18 | Built the pair sets | job 3257722 (`jobs/build_sampling.job`, account `env540`, QOS `normal`, CPU work on a GPU partition as in the existing build job), pool 3,000 trajectories = 75.0M pairs | finished | **[measured]** each 20,000,000 pairs (960 MB each, in `data/datasets`, not tracked): S3 from 800 trajectories, median activity 2.4e-5, 15% of pairs below 1e-7; S4 from 3,000 trajectories, median 1.3e-6, 34% below 1e-7; S5 median 5.1e-5, 2% below 1e-7; S6 median 4.1e-5, 0.2% below 1e-7. Pool list in `configs/datasets/sampling_pool.json`. | the sets differ as intended; screening runs (the B3 protocol) wait for Pablo's confirmation.
 
 ## 6b. Tasks: deliverable
@@ -508,7 +509,7 @@ Living record of the improvement work on branch `improvements-nov2026`. It lists
 - `A5-M10-B-s1` | 2026-11-17 | A5 seed check | `refB_train.npz`, valid `refB_valid.npz` | `configs/A5-M10-B-s1.json`: as `A5-M10-B`, seed 1 | account `cs-302`, QOS `cs-302`, fair-share 0.262, job 3255462 | pending | finished 2026-11-18 (800 epochs, 18 h), scored 2026-11-18 (jobs 3257705–3257707) | -
 - `A5-W-B-s1` | 2026-11-17 | A5 seed check | same | `configs/A5-W-B-s1.json`: as `A5-W-B`, seed 1 | account `math-454`, QOS `math-454`, fair-share 0.212, job 3255463 | pending | finished 2026-11-18 (800 epochs, 18 h), scored 2026-11-18 (jobs 3257705–3257707) | -
 - `A5-M1-B-s1` | 2026-11-17 | A5 seed check | same | `configs/A5-M1-B-s1.json`: as `A5-M1-B`, seed 1 | account `env540`, QOS `normal`, fair-share 0.186 (`cs-302` and `math-454` slots hold the other two seed runs), job 3255476 | pending | finished 2026-11-18 (800 epochs, 18 h), scored 2026-11-18 (jobs 3257705–3257707) | -
-- `B7-S3` | 2026-11-18 | B7 screen | `sampling_S3.npz` (20M pairs, 800 trajectories), valid `refB_valid.npz` | `configs/B7-S3.json`: as `A5-M10-B` (lograte, phys_weight 10, seed 0, 800 epochs) | account `cs-302`, QOS `cs-302`, job 3257724 | submitted | - | -
-- `B7-S4` | 2026-11-18 | B7 screen | `sampling_S4.npz` (20M pairs, per decade of activity) | `configs/B7-S4.json`: as above | account `math-454`, QOS `math-454`, job 3257725 | submitted | - | -
-- `B7-S5` | 2026-11-18 | B7 screen | `sampling_S5.npz` (20M pairs, per state-space cell) | `configs/B7-S5.json`: as above | account `env540`, QOS `normal`, job 3257726 | submitted | - | -
-- `B7-S6` | 2026-11-18 | B7 screen | `sampling_S6.npz` (20M pairs, equilibrium thinned) | `configs/B7-S6.json`: as above | account `env540`, QOS `normal`, job 3257727 | submitted | - | -
+- `B7-S3` | 2026-11-18 | B7 screen | `sampling_S3.npz` (20M pairs, 800 trajectories), valid `refB_valid.npz` | `configs/B7-S3.json`: as `A5-M10-B` (lograte, phys_weight 10, seed 0, 800 epochs) | account `cs-302`, QOS `cs-302`, job 3257724 | submitted | finished 800 epochs (18 to 23 h), scored 2026-11-20 (jobs 3261814–3261817) | -
+- `B7-S4` | 2026-11-18 | B7 screen | `sampling_S4.npz` (20M pairs, per decade of activity) | `configs/B7-S4.json`: as above | account `math-454`, QOS `math-454`, job 3257725 | submitted | finished 800 epochs (18 to 23 h), scored 2026-11-20 (jobs 3261814–3261817) | -
+- `B7-S5` | 2026-11-18 | B7 screen | `sampling_S5.npz` (20M pairs, per state-space cell) | `configs/B7-S5.json`: as above | account `env540`, QOS `normal`, job 3257726 | submitted | finished 800 epochs (18 to 23 h), scored 2026-11-20 (jobs 3261814–3261817) | -
+- `B7-S6` | 2026-11-18 | B7 screen | `sampling_S6.npz` (20M pairs, equilibrium thinned) | `configs/B7-S6.json`: as above | account `env540`, QOS `normal`, job 3257727 | submitted | finished 800 epochs (18 to 23 h), scored 2026-11-20 (jobs 3261814–3261817) | -

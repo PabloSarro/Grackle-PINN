@@ -21,6 +21,8 @@ import torch
 
 from grackle_pinn.model import PINN
 from grackle_pinn.param import build as build_param
+from grackle_pinn import physics_terms as PTERMS
+PHYS_FUNCS = {"P3": PTERMS.p3_energy_monotone, "P4": PTERMS.p4_chemistry, "P5": PTERMS.p5_equilibrium, "P6": PTERMS.p6_energy}
 from grackle_pinn.data_utils import GrackleDataset
 from grackle_pinn.physics import PhysicsLossManager
 from grackle_pinn.evaluate import window_rollout_score
@@ -30,6 +32,7 @@ DEFAULTS = dict(
     hidden_dim=512, hidden_layers=12, parameterisation="report",
     batch_size=8192, learning_rate=1.0e-4, epochs=900, check_every=10,
     weight_factor=10.0, lambda_mass_max=1.0e7, ramp_fraction=1.0,
+    physics={},               # B3: {"P3": w, "P4": w, "P5": w, "P6": w} fixed weights on the residuals of physics_terms (P1 = report mass term, see lambda_mass_max)
     phys_weight=0.0,          # A5: weight of an extra MSE on the physical increments (d ln e, d logit x), each divided by its std
     weight_physical=False,    # A5: the 1 + weight_factor |y| weight uses the standardised physical increment instead of the training target
     legacy_resume_epoch=None,                         # only for a checkpoint of the June loop (no epoch stored): epochs already done
@@ -80,25 +83,29 @@ def main():
     param = build_param(param_cfg)
 
     # ---- data
-    train_set = GrackleDataset(cfg["train_path"], param=param)
+    keep_raw = any(k != "P1" for k in cfg["physics"])
+    train_set = GrackleDataset(cfg["train_path"], param=param, keep_raw=keep_raw)
     if param.name == "constrained" and ckpt is None:
         param = build_param({"name": "constrained", "lmax": 1.25 * float(train_set.target_absmax[1])})
-        train_set = GrackleDataset(cfg["train_path"], param=param)   # same data, only the bound changes
+        train_set = GrackleDataset(cfg["train_path"], param=param, keep_raw=keep_raw)   # same data, only the bound changes
         print(f"constrained: |d logit x| <= {param.lmax:.3f}", flush=True)
     if param.name == "lograte" and ckpt is None:
         m = 2.0   # nats of margin beyond the training range for the clip used in rollouts
         param = build_param({"name": "lograte", "lo": (train_set.target_min - m).tolist(), "hi": (train_set.target_max + m).tolist()})
-        train_set = GrackleDataset(cfg["train_path"], param=param)
+        train_set = GrackleDataset(cfg["train_path"], param=param, keep_raw=keep_raw)
         print(f"lograte: clip range lo {param.lo} hi {param.hi}", flush=True)
     sc_cpu = {"in_mean": train_set.in_mean, "in_std": train_set.in_std, "tg_mean": train_set.tg_mean, "tg_std": train_set.tg_std}
     if ckpt is not None and "scaling" in ckpt:
         sc_cpu = ckpt["scaling"]
-        train_set = GrackleDataset(cfg["train_path"], param=param, in_mean=sc_cpu["in_mean"], in_std=sc_cpu["in_std"],
+        train_set = GrackleDataset(cfg["train_path"], param=param, keep_raw=keep_raw, in_mean=sc_cpu["in_mean"], in_std=sc_cpu["in_std"],
                                    tg_mean=sc_cpu["tg_mean"], tg_std=sc_cpu["tg_std"])
     valid_set = GrackleDataset(cfg["valid_path"], param=param, **sc_cpu)
     torch.save(sc_cpu, SCALING_NAME)
     sc = {k: v.to(device) for k, v in sc_cpu.items()}
     X, Y = train_set.all_inputs.to(device), train_set.all_targets.to(device)
+    PT_NAMES = [k for k in cfg["physics"] if k != "P1"]
+    if PT_NAMES:                       # B3: current states of the training pairs (physical log-state)
+        CUR = train_set.raw_cur.to(device)
     Xv, Yv = valid_set.all_inputs.to(device), valid_set.all_targets.to(device)
     N = X.shape[0]
     BS = cfg["batch_size"]
@@ -197,6 +204,13 @@ def main():
             else:   # mass conservation is exact by construction
                 loss_mass, lam = torch.zeros((), device=device), 0.0
             loss = loss_data + lam * loss_mass
+            if PT_NAMES:
+                # residuals of the predicted next state (one 100-yr step); each term is clamped at 1 so a few
+                # cliff steps cannot dominate the mean
+                nxt_pred = param.advance(CUR[idx], param.to_physical(out_raw, sc))
+                for k in PT_NAMES:
+                    r = PHYS_FUNCS[k](CUR[idx], nxt_pred)
+                    loss = loss + cfg["physics"][k] * torch.clamp(r ** 2, max=1.0).mean()
             if torch.isnan(loss):
                 print(f"[!] NaN at epoch {epoch + 1}, step {step}: data {loss_data.item():.4e}, mass {loss_mass.item():.4e}")
                 sys.exit(1)

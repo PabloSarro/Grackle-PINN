@@ -9,7 +9,7 @@ m_H = 1.6726219e-24  # Hydrogen Mass
 
 class GrackleDataset(Dataset):
     def __init__(self, folder_path, pattern="output_*.dat", in_mean=None, in_std=None, tg_mean=None, tg_std=None,
-                 param=None):
+                 param=None, keep_raw=False):
         """
         Load multiple Grackle simulations (will be our inputs).
         With the default `report` parameterisation:
@@ -47,6 +47,8 @@ class GrackleDataset(Dataset):
         for cur, nxt in pairs:
             inputs.append(param.features(cur))
             targets.append(param.targets(cur, nxt))
+        # raw (unnormalised) current states of the pairs, for physics residuals (B3)
+        self.raw_cur = torch.cat([c for c, _ in pairs]).to(torch.get_default_dtype()) if keep_raw else None
         self.all_inputs = torch.cat(inputs).to(torch.get_default_dtype())
         self.all_targets = torch.cat(targets).to(torch.get_default_dtype())
 

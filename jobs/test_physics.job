@@ -1,0 +1,14 @@
+#!/bin/bash
+# B3 unit tests for the physics residuals (tests/test_physics_terms.py). CPU work; account per TASKS.md 3.2.
+#SBATCH --job-name=PhysTest
+#SBATCH --time=00:30:00
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:1
+#SBATCH --output=results/logs/test_physics_%j.log
+cd "$SLURM_SUBMIT_DIR"
+source /home/sarro/venvs/grackle-pinn/bin/activate
+python tests/test_physics_terms.py

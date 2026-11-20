@@ -1,0 +1,14 @@
+#!/bin/bash
+# B3 smoke test: the training loop with physics terms, a few epochs on report8 (GPU debug QOS, <1 h).
+#SBATCH --job-name=SmokePhys
+#SBATCH --time=00:40:00
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:1
+#SBATCH --output=results/logs/smoke_physics_%j.log
+cd "$SLURM_SUBMIT_DIR"
+source /home/sarro/venvs/grackle-pinn/bin/activate
+python -m grackle_pinn.train --config scratch_b3/smoke.json

@@ -178,7 +178,7 @@ def main():
         model.train()
         g = torch.Generator().manual_seed(cfg["seed"] * 100003 + epoch)
         perm = torch.randperm(N, generator=g).to(device)
-        tot = dat = mas = 0.0
+        tot = dat = mas = phy = 0.0
         for i in range(0, N, BS):
             idx = perm[i:i + BS]
             bx, by = X[idx], Y[idx]
@@ -205,12 +205,14 @@ def main():
                 loss_mass, lam = torch.zeros((), device=device), 0.0
             loss = loss_data + lam * loss_mass
             if PT_NAMES:
+                loss_phys = torch.zeros((), device=device)
                 # residuals of the predicted next state (one 100-yr step); each term is clamped at 1 so a few
                 # cliff steps cannot dominate the mean
                 nxt_pred = param.advance(CUR[idx], param.to_physical(out_raw, sc))
                 for k in PT_NAMES:
                     r = PHYS_FUNCS[k](CUR[idx], nxt_pred)
-                    loss = loss + cfg["physics"][k] * torch.clamp(r ** 2, max=1.0).mean()
+                    term = cfg["physics"][k] * torch.clamp(r ** 2, max=1.0).mean()
+                    loss = loss + term; loss_phys = loss_phys + term.detach()
             if torch.isnan(loss):
                 print(f"[!] NaN at epoch {epoch + 1}, step {step}: data {loss_data.item():.4e}, mass {loss_mass.item():.4e}")
                 sys.exit(1)
@@ -219,6 +221,7 @@ def main():
             optimiser.step()
             step += 1
             tot += loss.item(); dat += loss_data.item(); mas += loss_mass.item()
+            phy += float(loss_phys) if PT_NAMES else 0.0
         nb = steps_per_epoch
         mse_s, roll_s = "nan", "nan"
         if epoch % cfg["check_every"] == 0 or epoch == cfg["epochs"] - 1:
@@ -235,7 +238,7 @@ def main():
                 save(BEST_NAME, epoch + 1)
                 print(f"[✓] new best ({cfg['select_on'] if use_rollout else 'mse'}) {score:.6e} at epoch {epoch + 1}, MSE {mse_s}", flush=True)
         lr = optimiser.param_groups[0]["lr"]
-        print(f"Epoch [{epoch + 1}/{cfg['epochs']}] loss {tot / nb:.6e} data {dat / nb:.6e} mass {mas / nb:.6e} "
+        print(f"Epoch [{epoch + 1}/{cfg['epochs']}] loss {tot / nb:.6e} data {dat / nb:.6e} mass {mas / nb:.6e} phys {phy / nb:.6e} "
               f"val {mse_s} roll {roll_s} lr {lr:.2e} ({time.time() - t0:.1f} s)", flush=True)
         with open(LOSSES_NAME, "a") as f:
             f.write(f"{epoch + 1} {dat / nb:.6e} {mas / nb:.6e} {tot / nb:.6e} {mse_s} {roll_s} {lr:.3e}\n")

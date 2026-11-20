@@ -32,6 +32,7 @@ DEFAULTS = dict(
     hidden_dim=512, hidden_layers=12, parameterisation="report",
     batch_size=8192, learning_rate=1.0e-4, epochs=900, check_every=10,
     weight_factor=10.0, lambda_mass_max=1.0e7, ramp_fraction=1.0,
+    physics_scheme="fixed",   # B3 weighting: "fixed" (weights as given), "ramp" (x step/planned steps), "gradnorm" (per epoch: physics gradient norm = data gradient norm x weight)
     physics={},               # B3: {"P3": w, "P4": w, "P5": w, "P6": w} fixed weights on the residuals of physics_terms (P1 = report mass term, see lambda_mass_max)
     phys_weight=0.0,          # A5: weight of an extra MSE on the physical increments (d ln e, d logit x), each divided by its std
     weight_physical=False,    # A5: the 1 + weight_factor |y| weight uses the standardised physical increment instead of the training target
@@ -179,6 +180,7 @@ def main():
         g = torch.Generator().manual_seed(cfg["seed"] * 100003 + epoch)
         perm = torch.randperm(N, generator=g).to(device)
         tot = dat = mas = phy = 0.0
+        gn_factor = 1.0
         for i in range(0, N, BS):
             idx = perm[i:i + BS]
             bx, by = X[idx], Y[idx]
@@ -205,13 +207,27 @@ def main():
                 loss_mass, lam = torch.zeros((), device=device), 0.0
             loss = loss_data + lam * loss_mass
             if PT_NAMES:
+                nxt_pred = param.advance(CUR[idx], param.to_physical(out_raw, sc))
+                if cfg["physics_scheme"] == "gradnorm" and i == 0:
+                    # per-epoch balance: scale so that the unweighted physics gradient has the size of the data gradient
+                    phys_raw = sum(torch.clamp(PHYS_FUNCS[k](CUR[idx], nxt_pred) ** 2, max=1.0).mean()
+                                   for k in PT_NAMES)
+                    gd = torch.autograd.grad(loss_data, list(model.parameters()), retain_graph=True)
+                    gp = torch.autograd.grad(phys_raw, list(model.parameters()), retain_graph=True)
+                    nd = torch.sqrt(sum((g ** 2).sum() for g in gd)); npph = torch.sqrt(sum((g ** 2).sum() for g in gp))
+                    gn_factor = float(nd / (npph + 1e-30))
+                if cfg["physics_scheme"] == "ramp":
+                    scale = min(1.0, step / (cfg["ramp_fraction"] * planned_steps))
+                elif cfg["physics_scheme"] == "gradnorm":
+                    scale = gn_factor
+                else:
+                    scale = 1.0
                 loss_phys = torch.zeros((), device=device)
                 # residuals of the predicted next state (one 100-yr step); each term is clamped at 1 so a few
                 # cliff steps cannot dominate the mean
-                nxt_pred = param.advance(CUR[idx], param.to_physical(out_raw, sc))
                 for k in PT_NAMES:
                     r = PHYS_FUNCS[k](CUR[idx], nxt_pred)
-                    term = cfg["physics"][k] * torch.clamp(r ** 2, max=1.0).mean()
+                    term = scale * cfg["physics"][k] * torch.clamp(r ** 2, max=1.0).mean()
                     loss = loss + term; loss_phys = loss_phys + term.detach()
             if torch.isnan(loss):
                 print(f"[!] NaN at epoch {epoch + 1}, step {step}: data {loss_data.item():.4e}, mass {loss_mass.item():.4e}")
